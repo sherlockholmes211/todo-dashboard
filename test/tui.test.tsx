@@ -30,21 +30,20 @@ describe('Dashboard', () => {
     const onAction = vi.fn();
     const view = render(<Dashboard tasks={tasks} width={80} now={() => now} onAction={onAction} />);
     view.stdin.write('j');
-    await new Promise(resolve => setTimeout(resolve, 10));
+    await vi.waitFor(() => expect(view.lastFrame()).toMatch(/› RUNNING\s+Second task/));
     view.stdin.write('s');
-    await new Promise(resolve => setTimeout(resolve, 10));
-    expect(onAction).toHaveBeenCalledWith('start', tasks[1]);
+    await vi.waitFor(() => expect(onAction).toHaveBeenCalledWith('start', tasks[1]));
     view.stdin.write('?');
-    await new Promise(resolve => setTimeout(resolve, 10));
-    expect(view.lastFrame()).toContain('Keyboard shortcuts');
+    await vi.waitFor(() => expect(view.lastFrame()).toContain('Keyboard shortcuts'));
   });
 
   it('cycles task filters with f', async () => {
     const view = render(<Dashboard tasks={tasks} width={80} now={() => now} />);
     view.stdin.write('f');
-    await new Promise(resolve => setTimeout(resolve, 10));
-    expect(view.lastFrame()).toContain('First task');
-    expect(view.lastFrame()).not.toContain('Second task');
+    await vi.waitFor(() => {
+      expect(view.lastFrame()).toContain('First task');
+      expect(view.lastFrame()).not.toContain('Second task');
+    });
   });
 
   it('captures text in interactive forms and submits on enter', async () => {
@@ -52,7 +51,6 @@ describe('Dashboard', () => {
     const view = render(<TextPrompt label="Task title" onSubmit={submit} onCancel={() => undefined} />);
     view.stdin.write('Ship it');
     view.stdin.write('\r');
-    await new Promise(resolve => setTimeout(resolve, 10));
-    expect(submit).toHaveBeenCalledWith('Ship it');
+    await vi.waitFor(() => expect(submit).toHaveBeenCalledWith('Ship it'));
   });
 });
