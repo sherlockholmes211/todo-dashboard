@@ -1,3 +1,4 @@
+import {createRequire} from 'node:module';
 import {Command} from 'commander';
 import {formatDashboard, formatTask, taskToJson} from './format.js';
 import type {TodoService} from './service.js';
@@ -8,7 +9,10 @@ type CliDependencies = {
   stderr: (value: string) => void;
   isTTY: boolean;
   confirm: (question: string) => Promise<boolean>;
+  version?: string;
 };
+
+const packageVersion = (createRequire(import.meta.url)('../package.json') as {version: string}).version;
 
 export type InterfaceMode = 'tui' | 'static' | 'cli';
 
@@ -24,7 +28,7 @@ export async function executeCli(args: string[], dependencies: CliDependencies):
   const program = new Command()
     .name('todo')
     .description('Task dashboard with concurrent timers')
-    .version('0.1.0')
+    .version(dependencies.version ?? packageVersion)
     .exitOverride()
     .configureOutput({writeOut: stdout, writeErr: stderr});
 

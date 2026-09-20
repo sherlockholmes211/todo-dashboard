@@ -30,6 +30,21 @@ async function run(args: string[], tty = false, confirmation = true) {
 }
 
 describe('CLI', () => {
+  it('prints the package-provided version instead of a stale CLI literal', async () => {
+    let stdout = '';
+    const dependencies = {
+      service,
+      stdout: (value: string) => { stdout += value; },
+      stderr: () => undefined,
+      isTTY: false,
+      confirm: async () => false,
+      version: '9.8.7'
+    };
+    const code = await executeCli(['--version'], dependencies);
+    expect(code).toBe(0);
+    expect(stdout.trim()).toBe('9.8.7');
+  });
+
   it('prints stable JSON for add, list, and show', async () => {
     const added = await run(['add', 'Build release', '--estimate', '2h', '--json']);
     expect(added.code).toBe(0);
