@@ -1,5 +1,5 @@
 import {constants} from 'node:fs';
-import {access, copyFile, mkdir, open, readFile, rename, stat, unlink, writeFile} from 'node:fs/promises';
+import {access, chmod, copyFile, mkdir, open, readFile, rename, stat, unlink, writeFile} from 'node:fs/promises';
 import {dirname} from 'node:path';
 import {createStore, type Store, storeSchema} from './domain.js';
 
@@ -36,14 +36,14 @@ export class StoreRepository {
   }
 
   async load(): Promise<Store> {
-    await mkdir(dirname(this.storePath), {recursive: true});
+    await this.preparePrivatePaths();
     try {
       return await this.readAndValidate(this.storePath);
     } catch (error) {
       if (!isNodeError(error, 'ENOENT')) throw error;
       const initial = createStore();
       try {
-        const handle = await open(this.storePath, 'wx');
+        const handle = await open(this.storePath, 'wx', 0o600);
         try {
           await handle.writeFile(`${JSON.stringify(initial, null, 2)}\n`, 'utf8');
           await handle.sync();
@@ -59,13 +59,14 @@ export class StoreRepository {
   }
 
   async mutate(operation: (store: Store) => Store | Promise<Store>): Promise<Store> {
-    await mkdir(dirname(this.storePath), {recursive: true});
+    await this.preparePrivatePaths();
     await this.acquireLock();
     try {
       const current = await this.load();
       const candidate = await operation(structuredClone(current));
       const next = storeSchema.parse({...candidate, schemaVersion: 1, revision: current.revision + 1});
       await copyFile(this.storePath, this.backupPath);
+      await this.hardenFile(this.backupPath);
       await this.atomicWrite(next);
       return next;
     } finally {
@@ -76,6 +77,7 @@ export class StoreRepository {
   }
 
   async restoreBackup(): Promise<Store> {
+    await this.preparePrivatePaths();
     await this.acquireLock();
     try {
       const backup = await this.readAndValidate(this.backupPath);
@@ -86,7 +88,10 @@ export class StoreRepository {
         if (!(error instanceof CorruptStoreError)) throw error;
       }
       const restored = storeSchema.parse({...backup, revision: (current?.revision ?? backup.revision) + 1});
-      if (current) await copyFile(this.storePath, this.backupPath);
+      if (current) {
+        await copyFile(this.storePath, this.backupPath);
+        await this.hardenFile(this.backupPath);
+      }
       await this.atomicWrite(restored);
       return restored;
     } finally {
@@ -131,7 +136,7 @@ export class StoreRepository {
 
   private async atomicWrite(store: Store): Promise<void> {
     const temporary = `${this.storePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
-    await writeFile(temporary, `${JSON.stringify(store, null, 2)}\n`, {encoding: 'utf8', flag: 'wx'});
+    await writeFile(temporary, `${JSON.stringify(store, null, 2)}\n`, {encoding: 'utf8', flag: 'wx', mode: 0o600});
     await rename(temporary, this.storePath);
   }
 
@@ -139,7 +144,7 @@ export class StoreRepository {
     const started = Date.now();
     while (true) {
       try {
-        const handle = await open(this.lockPath, 'wx');
+        const handle = await open(this.lockPath, 'wx', 0o600);
         try {
           await handle.writeFile(JSON.stringify({pid: process.pid, createdAt: new Date().toISOString()}));
         } finally {
@@ -176,6 +181,22 @@ export class StoreRepository {
       if (isNodeError(error, 'ENOENT')) return false;
       return false;
     }
+  }
+
+  private async preparePrivatePaths(): Promise<void> {
+    const directory = dirname(this.storePath);
+    await mkdir(directory, {recursive: true, mode: 0o700});
+    if (process.platform === 'win32') return;
+    await chmod(directory, 0o700);
+    await this.hardenFile(this.storePath);
+    await this.hardenFile(this.backupPath);
+  }
+
+  private async hardenFile(path: string): Promise<void> {
+    if (process.platform === 'win32') return;
+    await chmod(path, 0o600).catch(error => {
+      if (!isNodeError(error, 'ENOENT')) throw error;
+    });
   }
 }
 

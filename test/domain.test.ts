@@ -60,6 +60,16 @@ describe('task lifecycle and calculations', () => {
     expect(() => createTask({title: 'x'.repeat(201)}, now)).toThrow(/200/i);
   });
 
+  it.each([
+    ['newline', 'safe\nforged'],
+    ['tab', 'safe\tforged'],
+    ['escape', `safe${String.fromCharCode(27)}[31mforged`],
+    ['bell', `safe${String.fromCharCode(7)}forged`],
+    ['C1 control', `safe${String.fromCharCode(155)}forged`]
+  ])('rejects %s control characters in titles', (_name, title) => {
+    expect(() => createTask({title}, now)).toThrow(/control character/i);
+  });
+
   it('tracks simultaneous tasks independently', () => {
     const a = startTask(createTask({title: 'A'}, now), now);
     const b = startTask(createTask({title: 'B'}, now), at('2026-09-20T10:05:00.000Z'));

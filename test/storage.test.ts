@@ -1,8 +1,8 @@
-import {mkdtemp, readFile, rm, stat, writeFile} from 'node:fs/promises';
+import {chmod, mkdtemp, readFile, rm, stat, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {afterEach, describe, expect, it} from 'vitest';
-import {createTask} from '../src/domain.js';
+import {createStore, createTask} from '../src/domain.js';
 import {CorruptStoreError, StoreRepository} from '../src/storage.js';
 
 const directories: string[] = [];
@@ -34,6 +34,34 @@ describe('StoreRepository', () => {
     expect(changed.revision).toBe(1);
     expect(JSON.parse(await readFile(`${location.path}.bak`, 'utf8')).revision).toBe(0);
     await expect(stat(`${location.path}.lock`)).rejects.toMatchObject({code: 'ENOENT'});
+  });
+
+  it.skipIf(process.platform === 'win32')('creates its directory, store, lock, and backup with private permissions', async () => {
+    const location = await tempStore();
+    const storePath = join(location.directory, 'private', 'store.json');
+    const repository = new StoreRepository(storePath);
+    await repository.load();
+    let lockMode = 0;
+    await repository.mutate(async store => {
+      lockMode = (await stat(`${storePath}.lock`)).mode & 0o777;
+      return store;
+    });
+    expect((await stat(join(location.directory, 'private'))).mode & 0o777).toBe(0o700);
+    expect((await stat(storePath)).mode & 0o777).toBe(0o600);
+    expect((await stat(`${storePath}.bak`)).mode & 0o777).toBe(0o600);
+    expect(lockMode).toBe(0o600);
+  });
+
+  it.skipIf(process.platform === 'win32')('tightens permissions on an existing store and backup', async () => {
+    const location = await tempStore();
+    await writeFile(location.path, `${JSON.stringify(createStore())}\n`);
+    await writeFile(`${location.path}.bak`, `${JSON.stringify(createStore())}\n`);
+    await chmod(location.path, 0o644);
+    await chmod(`${location.path}.bak`, 0o644);
+    const repository = new StoreRepository(location.path);
+    await repository.load();
+    expect((await stat(location.path)).mode & 0o777).toBe(0o600);
+    expect((await stat(`${location.path}.bak`)).mode & 0o777).toBe(0o600);
   });
 
   it('serializes concurrent mutations without losing either change', async () => {

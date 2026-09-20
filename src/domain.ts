@@ -29,7 +29,13 @@ export const defaultSettings: Settings = settingsSchema.parse({});
 
 export const taskSchema = z.object({
   id: z.string().uuid(),
-  title: z.string().trim().min(1).max(TITLE_MAX_LENGTH),
+  title: z.string().trim().min(1).max(TITLE_MAX_LENGTH).refine(
+    title => Array.from(title).every(character => {
+      const codePoint = character.codePointAt(0)!;
+      return codePoint > 31 && (codePoint < 127 || codePoint > 159);
+    }),
+    'Title must not contain control characters'
+  ),
   status: z.enum(['pending', 'in_progress', 'completed']),
   estimateMs: z.number().positive().nullable(),
   trackedMs: z.number().nonnegative(),
