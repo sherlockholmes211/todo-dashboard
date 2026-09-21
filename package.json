@@ -1,7 +1,11 @@
 {
   "name": "todo-dashboard",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "description": "A fast, scriptable terminal dashboard for tasks and concurrent timers",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sherlockholmes211/todo-dashboard.git"
+  },
   "type": "module",
   "bin": {
     "todo": "dist/bin.js"

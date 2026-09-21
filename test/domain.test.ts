@@ -10,7 +10,8 @@ import {
   reopenTask,
   sortTasks,
   startTask,
-  updateTask
+  updateTask,
+  taskSchema
 } from '../src/domain.js';
 
 const at = (iso: string) => new Date(iso);
@@ -54,6 +55,16 @@ describe('deadline parsing', () => {
 
 describe('task lifecycle and calculations', () => {
   const now = at('2026-09-20T10:00:00.000Z');
+
+  it('defaults old and new tasks to medium priority and validates edits', () => {
+    const task = createTask({title: 'A'}, now);
+    expect(task.priority).toBe('medium');
+    const legacy = {...task} as Partial<typeof task>;
+    delete legacy.priority;
+    expect(taskSchema.parse(legacy).priority).toBe('medium');
+    expect(updateTask(task, {priority: 'urgent'}, now).priority).toBe('urgent');
+    expect(() => taskSchema.parse({...task, priority: 'critical'})).toThrow();
+  });
 
   it('requires a nonblank title no longer than 200 characters', () => {
     expect(() => createTask({title: '   '}, now)).toThrow(/title/i);

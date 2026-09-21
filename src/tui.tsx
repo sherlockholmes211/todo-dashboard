@@ -1,9 +1,20 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {Box, Text, useApp, useInput} from 'ink';
-import {defaultSettings, formatDuration, getMetrics, sortTasks, type Settings, type SortMode, type Task} from './domain.js';
+import {colorThemeIds, defaultSettings, formatDuration, getMetrics, parseDuration, parsePriority, sortTasks, taskSchema, type Health, type Priority, type Settings, type SortMode, type Task} from './domain.js';
+import {formatDeadline, formatDueIn} from './format.js';
 import type {TodoService} from './service.js';
 
 export type DashboardAction = 'start' | 'pause' | 'pauseAll' | 'done' | 'reopen' | 'delete' | 'details' | 'new' | 'edit' | 'settings';
+type DashboardColumn = Settings['visibleColumns'][number];
+
+const columnLabels: Record<DashboardColumn, string> = {
+  id: 'ID', state: 'STATE', task: 'TASK', tracked: 'TRACKED', effortLeft: 'EFFORT LEFT',
+  deadline: 'DEADLINE', dueIn: 'DUE IN', progress: 'PROGRESS', priority: 'PRIORITY', health: 'HEALTH'
+};
+const columnWidths: Record<DashboardColumn, number> = {
+  id: 10, state: 12, task: 25, tracked: 10, effortLeft: 13,
+  deadline: 18, dueIn: 13, progress: 27, priority: 11, health: 20
+};
 
 type DashboardProps = {
   tasks: Task[];
@@ -13,9 +24,73 @@ type DashboardProps = {
   onAction?: (action: DashboardAction, task?: Task, value?: string) => void;
 };
 
-export function TextPrompt({label, initial = '', onSubmit, onCancel}: {
+const pastelHealthColors: Record<Health, string> = {
+  DONE: '#A7F3D0',
+  OVERDUE: '#FDA4AF',
+  'ESTIMATE EXCEEDED': '#FCA5A5',
+  'AT RISK': '#FDBA74',
+  TIGHT: '#FDE68A',
+  'ON TRACK': '#A7F3D0',
+  UNKNOWN: '#CBD5E1'
+};
+
+function PriorityBadge({priority, monochrome, colors}: {priority: Priority; monochrome: boolean; colors: Settings['priorityColors']}) {
+  return <Text bold={!monochrome} {...(monochrome ? {} : {color: colors[priority]})}>[{priority.toUpperCase()}]</Text>;
+}
+
+const themePalettes: Record<Settings['colorTheme'], {border: string; title: string; accent: string; selectedBackground: string; selectedText: string}> = {
+  default: {border: '#C4B5FD', title: '#DDD6FE', accent: '#A7F3D0', selectedBackground: '#EDE9FE', selectedText: '#312E40'},
+  'lavender-dusk': {border: '#A99AC8', title: '#E5DDF3', accent: '#ABD8CA', selectedBackground: '#373348', selectedText: '#F7F4F2'},
+  'sage-cream': {border: '#93B3A5', title: '#E1E9DA', accent: '#B8D5BC', selectedBackground: '#30453C', selectedText: '#F7F4F2'},
+  'misty-blue': {border: '#9CB7CF', title: '#DDE8F2', accent: '#E6BEA8', selectedBackground: '#304357', selectedText: '#F7F4F2'},
+  'rose-slate': {border: '#BE9BAE', title: '#F0DCE5', accent: '#A9C7D4', selectedBackground: '#463746', selectedText: '#F7F4F2'},
+  'soft-amber': {border: '#BCA984', title: '#F0E0BE', accent: '#B4D1C3', selectedBackground: '#463E31', selectedText: '#F7F4F2'},
+  'quiet-monochrome': {border: '#858B97', title: '#E4E6EA', accent: '#B4BBC5', selectedBackground: '#343941', selectedText: '#F7F4F2'},
+  'high-contrast': {border: '#FFFFFF', title: '#00FFFF', accent: '#FFFF00', selectedBackground: '#FFFFFF', selectedText: '#000000'}
+};
+
+const themeLabels: Record<Settings['colorTheme'], string> = {
+  default: 'Default',
+  'lavender-dusk': 'Lavender dusk',
+  'sage-cream': 'Sage & cream',
+  'misty-blue': 'Misty blue & peach',
+  'rose-slate': 'Rose & slate',
+  'soft-amber': 'Soft amber',
+  'quiet-monochrome': 'Quiet monochrome',
+  'high-contrast': 'High contrast'
+};
+
+function screenPalette(settings: Settings) {
+  const base = themePalettes[settings.colorTheme];
+  return {
+    border: settings.borderColor ?? base.border,
+    title: settings.titleColor ?? base.title,
+    accent: settings.accentColor ?? base.accent,
+    selectedBackground: settings.selectedBackgroundColor ?? base.selectedBackground,
+    selectedText: settings.selectedTextColor ?? base.selectedText
+  };
+}
+
+function ScreenPanel({settings, title, height, children}: {settings: Settings; title: string; height: number; children: React.ReactNode}) {
+  const palette = screenPalette(settings);
+  const monochrome = settings.monochrome || process.env.NO_COLOR !== undefined;
+  return <Box
+    borderStyle={settings.symbols === 'ascii' ? 'classic' : 'round'}
+    {...(monochrome ? {} : {borderColor: palette.border})}
+    flexDirection="column"
+    paddingX={1}
+    minHeight={height}
+    width="100%"
+  >
+    <Text bold={!monochrome} {...(monochrome ? {} : {color: palette.title})}>{title}</Text>
+    {children}
+  </Box>;
+}
+
+export function TextPrompt({label, initial = '', error, onSubmit, onCancel}: {
   label: string;
   initial?: string;
+  error?: string;
   onSubmit: (value: string) => void;
   onCancel: () => void;
 }) {
@@ -31,11 +106,16 @@ export function TextPrompt({label, initial = '', onSubmit, onCancel}: {
     else if (key.backspace || key.delete) update(valueRef.current.slice(0, -1));
     else if (!key.ctrl && !key.meta && input) update(valueRef.current + input);
   });
-  return <Box flexDirection="column"><Text>{label}</Text><Text>&gt; {value}█</Text><Text dimColor>Enter confirms · Esc cancels</Text></Box>;
+  return <Box flexDirection="column"><Text>{label}</Text><Text>&gt; {value}█</Text>{error && <Text color="red">{error}</Text>}<Text dimColor>Enter confirms · Esc cancels</Text></Box>;
 }
 
-export function Dashboard({tasks, settings: overrides, width = process.stdout.columns ?? 80, now = () => new Date(), onAction}: DashboardProps) {
+export function Dashboard({tasks, settings: overrides, width: requestedWidth, now = () => new Date(), onAction}: DashboardProps) {
+  const width = requestedWidth ?? process.stdout.columns ?? 80;
+  const panelWidth: number | '100%' = requestedWidth === undefined ? '100%' : width;
   const settings = {...defaultSettings, ...overrides};
+  const palette = screenPalette(settings);
+  const textColor = (value: string) => settings.monochrome ? {} : {color: value};
+  const borderColor = settings.monochrome ? {} : {borderColor: palette.border};
   const [selected, setSelected] = useState(0);
   const [help, setHelp] = useState(false);
   const [query, setQuery] = useState('');
@@ -50,6 +130,7 @@ export function Dashboard({tasks, settings: overrides, width = process.stdout.co
   ), sort, now()), [tasks, settings.showCompleted, filter, query, sort, now]);
   const activeIndex = Math.min(selected, Math.max(visible.length - 1, 0));
   const active = visible[activeIndex];
+  const borderStyle = settings.symbols === 'ascii' ? 'classic' : 'round';
 
   useInput((input, key) => {
     if (searching) {
@@ -77,27 +158,72 @@ export function Dashboard({tasks, settings: overrides, width = process.stdout.co
     else if (input === 'o') setSort(value => value === 'created' ? 'deadline' : value === 'deadline' ? 'title' : value === 'title' ? 'health' : 'created');
   });
 
-  if (help) return <Box flexDirection="column"><Text bold>Keyboard shortcuts</Text><Text>j/k or arrows navigate · Enter details · n new · e edit · s start · p pause · P pause all</Text><Text>c complete · r reopen · d delete · / search · o sort · , settings · ? help · q quit</Text></Box>;
+  if (help) return <Box borderStyle={borderStyle} {...borderColor} flexDirection="column" paddingX={1} width={panelWidth}>
+    <Text bold={!settings.monochrome} {...textColor(palette.title)}>Keyboard shortcuts</Text>
+    <Text>j/k or arrows navigate · Enter details · n new · e edit · s start · p pause · P pause all</Text>
+    <Text>c complete · r reopen · d delete · / search · o sort · , settings · ? help · q quit</Text>
+  </Box>;
 
   const symbol = settings.symbols === 'ascii' ? '>' : '›';
-  const layout = width >= 100 ? 'wide' : width >= 60 ? 'medium' : 'narrow';
-  return <Box flexDirection="column">
-    <Text bold>TODO DASHBOARD</Text>
-    <Text>{visible.length} tasks · filter {filter} · sort {sort}{query ? ` · search: ${query}` : ''}{searching ? '█' : ''}</Text>
-    {layout !== 'narrow' && <Text bold>{layout === 'wide' ? '  ID        STATE       TASK                          TRACKED    WORK LEFT  PROGRESS  HEALTH' : '  STATE       TASK                         TRACKED   HEALTH'}</Text>}
-    {visible.length === 0 && <Text>No tasks. Press n to create one.</Text>}
-    {visible.map((task, index) => {
-      const metrics = getMetrics(task, now());
-      const color = settings.monochrome ? undefined : settings.healthColors[metrics.health];
-      const selectedMarker = index === activeIndex ? symbol : ' ';
-      const state = task.activeSince ? 'RUNNING' : task.status === 'completed' ? 'DONE' : 'PENDING';
-      const colored = color ? {color} : {};
-      if (layout === 'narrow') return <Text key={task.id} {...colored}>{selectedMarker} {state === 'RUNNING' ? '*' : '-'} {task.title} [{metrics.health}]</Text>;
-      if (layout === 'medium') return <Text key={task.id} {...colored}>{selectedMarker} {state.padEnd(11)} {task.title.slice(0, 28).padEnd(29)} {formatDuration(metrics.effectiveTrackedMs).padEnd(9)} {metrics.health}</Text>;
-      return <Text key={task.id} {...colored}>{selectedMarker} {task.id.slice(0, 8)}  {state.padEnd(11)} {task.title.slice(0, 29).padEnd(30)} {formatDuration(metrics.effectiveTrackedMs).padEnd(10)} {(metrics.workLeftMs === null ? '—' : formatDuration(metrics.workLeftMs)).padEnd(10)} {progressBar(metrics.progress, settings.progressBarWidth, settings.symbols)} {metrics.health}</Text>;
-    })}
-    {layout === 'narrow' && active && <Text>Selected: {active.title} · tracked {formatDuration(getMetrics(active, now()).effectiveTrackedMs)}</Text>}
-    <Text dimColor>j/k navigate · f filter · o sort · ? help · q quit</Text>
+  const layout = width >= 135 ? 'wide' : width >= 80 ? 'medium' : 'narrow';
+  const showProgress = layout === 'wide' && width >= 147 + settings.progressBarWidth;
+  const customColumns = settings.visibleColumns.join(',') !== defaultSettings.visibleColumns.join(',');
+  const columns = settings.visibleColumns;
+  const selectedTime = now();
+  const selectedWorkLeft = active ? getMetrics(active, selectedTime).workLeftMs : null;
+  return <Box flexDirection="column" width={panelWidth}>
+    <Box borderStyle={borderStyle} {...borderColor} flexDirection="column" paddingX={1} width={panelWidth}>
+      <Text bold={!settings.monochrome} {...textColor(palette.title)}>TODO DASHBOARD</Text>
+      <Text {...textColor(palette.accent)}>{visible.length} tasks · filter {filter} · sort {sort}{query ? ` · search: ${query}` : ''}{searching ? '█' : ''}</Text>
+    </Box>
+    <Box marginTop={1} borderStyle={borderStyle} {...borderColor} flexDirection="column" paddingX={1} width={panelWidth}>
+      <Text bold={!settings.monochrome} {...textColor(palette.title)}>TASKS</Text>
+      {layout !== 'narrow' && <Text bold={!settings.monochrome} {...textColor(palette.accent)}>{customColumns ? `  ${columns.map(column => columnLabels[column].padEnd(columnWidths[column])).join('')}` : layout === 'wide' ? `  ID        STATE       TASK                      TRACKED   EFFORT LEFT  DEADLINE          DUE IN       ${showProgress ? `${'PROGRESS'.padEnd(settings.progressBarWidth + 6)} ` : ''}PRIORITY  HEALTH` : '  STATE       TASK                EFFORT LEFT  DUE IN       PRIORITY  HEALTH'}</Text>}
+      {visible.length === 0 && <Text>No tasks. Press n to create one.</Text>}
+      {visible.map((task, index) => {
+        const currentTime = now();
+        const metrics = getMetrics(task, currentTime);
+        const effortLeft = metrics.workLeftMs === null ? '—' : formatDuration(metrics.workLeftMs);
+        const dueIn = formatDueIn(task, currentTime);
+        const selectedMarker = index === activeIndex ? symbol : ' ';
+        const state = task.activeSince ? 'RUNNING' : task.status === 'completed' ? 'DONE' : 'PENDING';
+        const selected = index === activeIndex;
+        const configuredHealthColor = settings.healthColors[metrics.health];
+        const healthColor = settings.colorTheme !== 'high-contrast' && configuredHealthColor === defaultSettings.healthColors[metrics.health]
+          ? pastelHealthColors[metrics.health]
+          : configuredHealthColor ?? palette.title;
+        const colored = {
+          ...textColor(selected ? palette.selectedText : healthColor),
+          ...(selected && !settings.monochrome ? {backgroundColor: palette.selectedBackground} : {}),
+          bold: selected && !settings.monochrome
+        };
+        if (customColumns && layout === 'narrow') {
+          const values: Record<DashboardColumn, string> = {
+            id: task.id.slice(0, 8), state, task: task.title, tracked: formatDuration(metrics.effectiveTrackedMs),
+            effortLeft, deadline: formatDeadline(task.deadlineAt), dueIn,
+            progress: progressBar(metrics.progress, settings.progressBarWidth, settings.symbols),
+            priority: `[${task.priority.toUpperCase()}]`, health: metrics.health
+          };
+          return <Text key={task.id} {...colored}>{selectedMarker} {columns.map(column => column === 'task' ? values.task : `${columnLabels[column].toLowerCase()} ${values[column]}`).join(' · ')}</Text>;
+        }
+        if (customColumns && layout !== 'narrow') {
+          const cells: Record<DashboardColumn, string> = {
+            id: task.id.slice(0, 8), state, task: task.title, tracked: formatDuration(metrics.effectiveTrackedMs),
+            effortLeft, deadline: formatDeadline(task.deadlineAt), dueIn,
+            progress: progressBar(metrics.progress, settings.progressBarWidth, settings.symbols),
+            priority: `[${task.priority.toUpperCase()}]`, health: metrics.health
+          };
+          return <Box key={task.id}><Text {...colored}>{selectedMarker} </Text>{columns.map(column => column === 'priority'
+            ? <React.Fragment key={column}><PriorityBadge priority={task.priority} monochrome={settings.monochrome} colors={settings.priorityColors} /><Text>{' '.repeat(Math.max(1, columnWidths.priority - cells.priority.length))}</Text></React.Fragment>
+            : <Text key={column} {...colored}>{cells[column].slice(0, columnWidths[column] - 1).padEnd(columnWidths[column])}</Text>)}</Box>;
+        }
+        if (layout === 'narrow') return <Text key={task.id} {...colored}>{selectedMarker} {state === 'RUNNING' ? '*' : '-'} {task.title} <PriorityBadge priority={task.priority} monochrome={settings.monochrome} colors={settings.priorityColors} /> [{metrics.health}]</Text>;
+        if (layout === 'medium') return <Text key={task.id} {...colored}>{selectedMarker} {state.padEnd(11)} {task.title.slice(0, 18).padEnd(19)} {effortLeft.padEnd(12)} {dueIn.padEnd(12)} <PriorityBadge priority={task.priority} monochrome={settings.monochrome} colors={settings.priorityColors} /> {metrics.health}</Text>;
+        return <Text key={task.id} {...colored}>{selectedMarker} {task.id.slice(0, 8)}  {state.padEnd(11)} {task.title.slice(0, 24).padEnd(25)} {formatDuration(metrics.effectiveTrackedMs).padEnd(9)} {effortLeft.padEnd(12)} {formatDeadline(task.deadlineAt).padEnd(17)} {dueIn.padEnd(12)} {showProgress ? `${progressBar(metrics.progress, settings.progressBarWidth, settings.symbols)} ` : ''}<PriorityBadge priority={task.priority} monochrome={settings.monochrome} colors={settings.priorityColors} /> {metrics.health}</Text>;
+      })}
+      {layout === 'narrow' && active && !customColumns && <><Text>Selected: {active.title}</Text><Text>effort left {selectedWorkLeft === null ? '—' : formatDuration(selectedWorkLeft)} · due in {formatDueIn(active, selectedTime)}</Text></>}
+    </Box>
+    <Text dimColor={!settings.monochrome}>j/k navigate · f filter · o sort · , settings · {searching ? 'Enter/Esc exit search' : '/ search'} · ? help · q quit</Text>
   </Box>;
 }
 
@@ -111,10 +237,11 @@ function progressBar(progress: number | null, width: number, symbols: Settings['
 
 type EditorModal = {
   kind: 'new' | 'edit';
-  step: 'title' | 'estimate' | 'date' | 'time';
+  step: 'title' | 'estimate' | 'priority' | 'date' | 'time';
   task?: Task;
   title: string;
   estimate: string;
+  priority: string;
   date: string;
   time: string;
 };
@@ -136,6 +263,7 @@ export function TodoApp({service}: {service: TodoService}) {
   const [settings, setSettings] = useState<Settings>(defaultSettings);
   const [, setTick] = useState(0);
   const [message, setMessage] = useState('');
+  const [editorError, setEditorError] = useState('');
   const [modal, setModal] = useState<Modal | null>(null);
   const reload = async () => {
     const store = await service.getStore();
@@ -151,11 +279,13 @@ export function TodoApp({service}: {service: TodoService}) {
   const action = async (name: DashboardAction, task?: Task) => {
     try {
       if (name === 'new') {
-        setModal({kind: 'new', step: 'title', title: '', estimate: '', date: '', time: ''});
+        setEditorError('');
+        setModal({kind: 'new', step: 'title', title: '', estimate: '', priority: 'medium', date: '', time: ''});
         return;
       } else if (name === 'edit' && task) {
+        setEditorError('');
         const due = localDateParts(task.deadlineAt);
-        setModal({kind: 'edit', step: 'title', task, title: task.title, estimate: task.estimateMs ? formatDuration(task.estimateMs) : '', ...due});
+        setModal({kind: 'edit', step: 'title', task, title: task.title, estimate: task.estimateMs ? formatDuration(task.estimateMs) : '', priority: task.priority, ...due});
         return;
       } else if (name === 'delete' && task) {
         setModal({kind: 'delete', task});
@@ -179,27 +309,47 @@ export function TodoApp({service}: {service: TodoService}) {
 
   const submitEditor = async (value: string) => {
     if (!modal || (modal.kind !== 'new' && modal.kind !== 'edit')) return;
-    if (modal.step === 'title') setModal({...modal, title: value, step: 'estimate'});
-    else if (modal.step === 'estimate') setModal({...modal, estimate: value, step: 'date'});
-    else if (modal.step === 'date') {
-      if (value && /^\d{4}-\d{2}-\d{2}$/.test(value)) setModal({...modal, date: value, step: 'time'});
+    setEditorError('');
+    if (modal.step === 'title') {
+      if (!value.trim()) setEditorError('Title is required');
       else {
-        const finished = {...modal, date: value};
-        try { await saveEditor(finished); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
+        const result = taskSchema.shape.title.safeParse(value);
+        if (!result.success) setEditorError(result.error.issues[0]?.message ?? 'Invalid title');
+        else setModal({...modal, title: result.data, step: 'estimate'});
       }
+    } else if (modal.step === 'estimate') {
+      try {
+        if (value) parseDuration(value);
+        setModal({...modal, estimate: value, step: 'priority'});
+      } catch (error) { setEditorError(error instanceof Error ? error.message : String(error)); }
+    }
+    else if (modal.step === 'priority') {
+      try { setModal({...modal, priority: parsePriority(value), step: 'date'}); }
+      catch (error) { setEditorError(error instanceof Error ? error.message : String(error)); }
+    }
+    else if (modal.step === 'date') {
+      if (!value) {
+        try { await saveEditor({...modal, date: '', time: ''}); } catch (error) { setEditorError(error instanceof Error ? error.message : String(error)); }
+      } else if (isValidDate(value)) setModal({...modal, date: value, step: 'time'});
+      else setEditorError('Enter a valid date as YYYY-MM-DD, or leave blank');
     } else {
+      if (value && !/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) {
+        setEditorError('Enter time as HH:mm, or leave blank');
+        return;
+      }
       const finished = {...modal, time: value};
-      try { await saveEditor(finished); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
+      try { await saveEditor(finished); } catch (error) { setEditorError(error instanceof Error ? error.message : String(error)); }
     }
   };
 
   const saveEditor = async (editor: EditorModal) => {
     const due = editor.date ? `${editor.date}${editor.time ? ` ${editor.time}` : ''}` : undefined;
     if (editor.kind === 'new') {
-      await service.add(editor.title, {...(editor.estimate ? {estimate: editor.estimate} : {}), ...(due ? {due} : {})});
+      await service.add(editor.title, {priority: editor.priority, ...(editor.estimate ? {estimate: editor.estimate} : {}), ...(due ? {due} : {})});
     } else if (editor.task) {
       await service.edit(editor.task.id, {
         title: editor.title,
+        priority: editor.priority,
         ...(editor.estimate ? {estimate: editor.estimate} : {clearEstimate: true}),
         ...(due ? {due} : {clearDue: true})
       });
@@ -209,45 +359,90 @@ export function TodoApp({service}: {service: TodoService}) {
     await reload();
   };
 
+  const visibleTaskCount = tasks.filter(task => settings.showCompleted || task.status !== 'completed').length;
+  // Match the dashboard's summary, gap, task panel, and footer around its task rows.
+  const screenHeight = 10 + Math.max(1, visibleTaskCount) + (visibleTaskCount > 0 && (process.stdout.columns ?? 80) < 80 ? 1 : 0);
+
   if (modal?.kind === 'new' || modal?.kind === 'edit') {
-    const labels = {title: 'Task title', estimate: 'Estimate (for example 1h 30m; blank for none)', date: 'Deadline date/natural language (blank for none)', time: 'Deadline time (HH:mm; blank uses default)'};
-    return <TextPrompt
-      key={`${modal.kind}-${modal.step}`}
-      label={labels[modal.step]}
-      initial={modal[modal.step]}
-      onSubmit={value => { void submitEditor(value); }}
-      onCancel={() => setModal(null)}
-    />;
+    const labels = {title: 'Task title', estimate: 'Estimate (for example 1h 30m; blank for none)', priority: 'Priority (low, medium, high, urgent)', date: 'Deadline date (YYYY-MM-DD; blank for none)', time: 'Deadline time (HH:mm; blank uses default)'};
+    const step = ['title', 'estimate', 'priority', 'date', 'time'].indexOf(modal.step) + 1;
+    const monochrome = settings.monochrome || process.env.NO_COLOR !== undefined;
+    return <ScreenPanel settings={settings} title={modal.kind === 'new' ? 'NEW TASK' : 'EDIT TASK'} height={screenHeight}>
+      <Text {...(monochrome ? {} : {color: screenPalette(settings).accent})}>Step {step} of 5</Text>
+      <Box marginTop={1}>
+        <TextPrompt
+          key={`${modal.kind}-${modal.step}`}
+          label={labels[modal.step]}
+          initial={modal[modal.step]}
+          error={editorError}
+          onSubmit={value => { void submitEditor(value); }}
+          onCancel={() => setModal(null)}
+        />
+      </Box>
+    </ScreenPanel>;
   }
-  if (modal?.kind === 'delete') return <Confirmation
-    text={`Delete "${modal.task.title}"?`}
-    onAnswer={async confirmed => {
-      if (confirmed) await service.delete(modal.task.id);
-      setModal(null);
-      setMessage(confirmed ? 'Task deleted' : 'Deletion cancelled');
-      await reload();
-    }}
-  />;
-  if (modal?.kind === 'details') return <Dismissible title={modal.task.title} onClose={() => setModal(null)}><Text>{modal.task.id}</Text><Text>Status: {modal.task.status}</Text><Text>Tracked: {formatDuration(getMetrics(modal.task).effectiveTrackedMs)}</Text><Text>Deadline: {modal.task.deadlineAt ? new Date(modal.task.deadlineAt).toLocaleString() : '—'}</Text></Dismissible>;
-  if (modal?.kind === 'settings') return <SettingsPanel settings={settings} service={service} onClose={async () => { setModal(null); await reload(); }} />;
+  if (modal?.kind === 'delete') {
+    const monochrome = settings.monochrome || process.env.NO_COLOR !== undefined;
+    return <ScreenPanel settings={settings} title="DELETE TASK" height={screenHeight}>
+      <Box flexDirection="column" marginTop={1}>
+        <Text bold={!monochrome} {...(monochrome ? {} : {color: settings.colorTheme === 'high-contrast' ? '#FF5555' : pastelHealthColors.OVERDUE})}>This cannot be undone.</Text>
+        <Confirmation
+          text={`Delete "${modal.task.title}"?`}
+          onAnswer={async confirmed => {
+            if (confirmed) await service.delete(modal.task.id);
+            setModal(null);
+            setMessage(confirmed ? 'Task deleted' : 'Deletion cancelled');
+            await reload();
+          }}
+        />
+        <Text dimColor={!monochrome}>Press y to delete · n or Esc to cancel</Text>
+      </Box>
+    </ScreenPanel>;
+  }
+  if (modal?.kind === 'details') {
+    const palette = screenPalette(settings);
+    const monochrome = settings.monochrome || process.env.NO_COLOR !== undefined;
+    const metrics = getMetrics(modal.task);
+    return <ScreenPanel settings={settings} title="TASK DETAILS" height={screenHeight}>
+      <Dismissible onClose={() => setModal(null)}>
+        <Box borderStyle={settings.symbols === 'ascii' ? 'classic' : 'round'} {...(monochrome ? {} : {borderColor: palette.accent})} flexDirection="column" paddingX={1} width="100%">
+          <Text bold={!monochrome} {...(monochrome ? {} : {color: palette.title})}>{modal.task.title}</Text>
+          <Box><Text {...(monochrome ? {} : {color: palette.accent})}>Status: {modal.task.status}</Text><Text>  Priority: </Text><PriorityBadge priority={modal.task.priority} monochrome={monochrome} colors={settings.priorityColors} /></Box>
+          <Text>Tracked: {formatDuration(metrics.effectiveTrackedMs)}    Effort left: {metrics.workLeftMs === null ? '—' : formatDuration(metrics.workLeftMs)}</Text>
+          <Text>Deadline: {formatDeadline(modal.task.deadlineAt)}    Due in: {formatDueIn(modal.task, new Date())}</Text>
+          <Text dimColor={!monochrome}>ID: {modal.task.id}</Text>
+        </Box>
+      </Dismissible>
+    </ScreenPanel>;
+  }
+  if (modal?.kind === 'settings') return <SettingsPanel settings={settings} service={service} height={screenHeight} onClose={async () => { setModal(null); await reload(); }} />;
   return <Box flexDirection="column"><Dashboard tasks={tasks} settings={{...settings, monochrome: settings.monochrome || process.env.NO_COLOR !== undefined}} onAction={(name, task) => { void action(name, task); }} />{message && <Text>{message}</Text>}</Box>;
 }
 
+function isValidDate(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return date.getFullYear() === Number(match[1]) && date.getMonth() === Number(match[2]) - 1 && date.getDate() === Number(match[3]);
+}
+
 function Confirmation({text, onAnswer}: {text: string; onAnswer: (answer: boolean) => void | Promise<void>}) {
-  useInput(input => {
+  useInput((input, key) => {
     if (input.toLocaleLowerCase() === 'y') void onAnswer(true);
-    else if (input.toLocaleLowerCase() === 'n' || input === '\u001b') void onAnswer(false);
+    else if (input.toLocaleLowerCase() === 'n' || key.escape) void onAnswer(false);
   });
   return <Text>{text} [y/N]</Text>;
 }
 
-function Dismissible({title, onClose, children}: {title: string; onClose: () => void; children: React.ReactNode}) {
+function Dismissible({onClose, children}: {onClose: () => void; children: React.ReactNode}) {
   useInput((_input, key) => { if (key.escape || key.return) onClose(); });
-  return <Box flexDirection="column"><Text bold>{title}</Text>{children}<Text dimColor>Enter/Esc returns</Text></Box>;
+  return <Box flexDirection="column" width="100%">{children}<Text dimColor>Enter/Esc returns</Text></Box>;
 }
 
-function SettingsPanel({settings, service, onClose}: {settings: Settings; service: TodoService; onClose: () => void | Promise<void>}) {
+function SettingsPanel({settings, service, height, onClose}: {settings: Settings; service: TodoService; height: number; onClose: () => void | Promise<void>}) {
   const [current, setCurrent] = useState(settings);
+  const [editing, setEditing] = useState<{key: string; label: string} | null>(null);
+  const [error, setError] = useState('');
   const change = async (key: string, value: string) => {
     const updated = await service.setConfig(key, value);
     setCurrent(updated);
@@ -258,6 +453,41 @@ function SettingsPanel({settings, service, onClose}: {settings: Settings; servic
     else if (input === 'u') void change('symbols', current.symbols === 'unicode' ? 'ascii' : 'unicode');
     else if (input === 't') void change('clock', current.clock === '24h' ? '12h' : '24h');
     else if (input === 'c') void change('showCompleted', String(!current.showCompleted));
-  });
-  return <Box flexDirection="column"><Text bold>Settings</Text><Text>m monochrome: {String(current.monochrome)}</Text><Text>u symbols: {current.symbols}</Text><Text>t clock: {current.clock}</Text><Text>c show completed: {String(current.showCompleted)}</Text><Text dimColor>Enter/Esc returns</Text></Box>;
+    else if (input === 'p') void change('colorTheme', colorThemeIds[(colorThemeIds.indexOf(current.colorTheme) + 1) % colorThemeIds.length]!);
+    else {
+      const fields: Record<string, {key: string; label: string}> = {
+        b: {key: 'borderColor', label: 'Border color (#RRGGBB or default)'},
+        h: {key: 'titleColor', label: 'Heading color (#RRGGBB or default)'},
+        a: {key: 'accentColor', label: 'Accent color (#RRGGBB or default)'},
+        g: {key: 'selectedBackgroundColor', label: 'Selection background (#RRGGBB or default)'},
+        x: {key: 'selectedTextColor', label: 'Selection text (#RRGGBB or default)'},
+        v: {key: 'visibleColumns', label: 'Visible columns (comma separated)'}
+      };
+      if (fields[input]) { setError(''); setEditing(fields[input]); }
+    }
+  }, {isActive: editing === null});
+  if (editing) return <ScreenPanel settings={current} title="EDIT SETTING" height={height}>
+    <Box marginTop={1}>
+      <TextPrompt label={editing.label} error={error} onCancel={() => { setEditing(null); setError(''); }} onSubmit={value => {
+        void change(editing.key, value).then(() => { setEditing(null); setError(''); }).catch(cause => setError(cause instanceof Error ? cause.message : String(cause)));
+      }} />
+    </Box>
+  </ScreenPanel>;
+  const palette = screenPalette(current);
+  const monochrome = current.monochrome || process.env.NO_COLOR !== undefined;
+  return <ScreenPanel settings={current} title="Settings" height={11}>
+    <Text>m monochrome: {String(current.monochrome)}</Text>
+    <Text>u symbols: {current.symbols}</Text>
+    <Text>t clock: {current.clock}</Text>
+    <Text>c show completed: {String(current.showCompleted)}</Text>
+    <Text>p theme: {themeLabels[current.colorTheme]} (press p to cycle)</Text>
+    <Text {...(monochrome ? {} : {backgroundColor: palette.selectedBackground, color: palette.selectedText})}> Selected task preview </Text>
+    <Text>b border: {current.borderColor ?? 'theme'}</Text>
+    <Text>h heading: {current.titleColor ?? 'theme'}</Text>
+    <Text>a accent: {current.accentColor ?? 'theme'}</Text>
+    <Text>g selection background: {current.selectedBackgroundColor ?? 'theme'}</Text>
+    <Text>x selection text: {current.selectedTextColor ?? 'theme'}</Text>
+    <Text>v columns: {current.visibleColumns.join(',')}</Text>
+    <Text dimColor={!monochrome}>Enter/Esc returns</Text>
+  </ScreenPanel>;
 }

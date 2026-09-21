@@ -65,4 +65,33 @@ describe('TodoService', () => {
     await expect(service.setConfig('progressBarWidth', '2')).rejects.toThrow();
     await expect(service.getConfig('missing')).rejects.toThrow(/unknown/i);
   });
+
+  it.each(['lavender-dusk', 'sage-cream', 'misty-blue', 'rose-slate', 'soft-amber', 'quiet-monochrome'])('saves the %s dashboard theme', async theme => {
+    await service.setConfig('colorTheme', theme);
+    expect(await service.getConfig('colorTheme')).toBe(theme);
+    const reopened = new TodoService(new StoreRepository(join(directory, 'store.json')));
+    expect(await reopened.getConfig('colorTheme')).toBe(theme);
+  });
+
+  it('rejects an unknown dashboard theme', async () => {
+    await expect(service.setConfig('colorTheme', 'neon-rainbow')).rejects.toThrow();
+  });
+
+  it('persists dashboard colors and a comma-separated visible column list', async () => {
+    await service.setConfig('borderColor', '#123456');
+    await service.setConfig('titleColor', '#abcdef');
+    await service.setConfig('priorityColors', '{"high":"#112233"}');
+    await service.setConfig('healthColors', '{"OVERDUE":"#445566"}');
+    await service.setConfig('visibleColumns', 'task,dueIn,priority');
+    expect(await service.getConfig('borderColor')).toBe('#123456');
+    expect(await service.getConfig('titleColor')).toBe('#abcdef');
+    expect(await service.getConfig('priorityColors')).toMatchObject({high: '#112233'});
+    expect(await service.getConfig('healthColors')).toMatchObject({OVERDUE: '#445566', DONE: 'green'});
+    expect(await service.getConfig('visibleColumns')).toEqual(['task', 'dueIn', 'priority']);
+    await service.setConfig('borderColor', 'default');
+    expect(await service.getConfig('borderColor')).toBeNull();
+    await expect(service.setConfig('borderColor', 'not-a-color')).rejects.toThrow();
+    await expect(service.setConfig('visibleColumns', 'task,unknown')).rejects.toThrow();
+    await expect(service.setConfig('visibleColumns', '')).rejects.toThrow();
+  });
 });

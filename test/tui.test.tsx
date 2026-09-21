@@ -1,8 +1,19 @@
 import React from 'react';
+import {mkdtemp, rm} from 'node:fs/promises';
+import {createRequire} from 'node:module';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {pathToFileURL} from 'node:url';
 import {render} from 'ink-testing-library';
 import {describe, expect, it, vi} from 'vitest';
-import {createTask, startTask} from '../src/domain.js';
+import {createTask, startTask, type Settings} from '../src/domain.js';
 import {Dashboard, TextPrompt} from '../src/tui.js';
+import {TodoApp} from '../src/tui.js';
+import {TodoService} from '../src/service.js';
+import {StoreRepository} from '../src/storage.js';
+
+const inkRequire = createRequire(import.meta.resolve('ink'));
+const inkChalk = (await import(pathToFileURL(inkRequire.resolve('chalk')).href) as {default: {level: number}}).default;
 
 const now = new Date('2026-09-20T10:00:00.000Z');
 const tasks = [
@@ -11,12 +22,184 @@ const tasks = [
 ];
 
 describe('Dashboard', () => {
+  it.each([
+    {theme: 'lavender-dusk', border: '169;154;200', heading: '229;221;243', accent: '171;216;202', selection: '55;51;72'},
+    {theme: 'sage-cream', border: '147;179;165', heading: '225;233;218', accent: '184;213;188', selection: '48;69;60'},
+    {theme: 'misty-blue', border: '156;183;207', heading: '221;232;242', accent: '230;190;168', selection: '48;67;87'},
+    {theme: 'rose-slate', border: '190;155;174', heading: '240;220;229', accent: '169;199;212', selection: '70;55;70'},
+    {theme: 'soft-amber', border: '188;169;132', heading: '240;224;190', accent: '180;209;195', selection: '70;62;49'},
+    {theme: 'quiet-monochrome', border: '133;139;151', heading: '228;230;234', accent: '180;187;197', selection: '52;57;65'}
+  ])('renders the $theme palette on the dashboard', ({theme, border, heading, accent, selection}) => {
+    const originalLevel = inkChalk.level;
+    inkChalk.level = 3;
+    try {
+      const task = createTask({title: 'Ship release'}, now);
+      const view = render(<Dashboard tasks={[task]} settings={{colorTheme: theme as Settings['colorTheme']}} width={100} now={() => now} />);
+      const frame = view.lastFrame() ?? '';
+      expect(frame).toContain(`\u001b[38;2;${border}m╭`);
+      expect(frame).toContain(`\u001b[38;2;${heading}mTODO DASHBOARD`);
+      expect(frame).toContain(`\u001b[38;2;${accent}m1 tasks`);
+      expect(frame).toContain(`\u001b[48;2;${selection}m`);
+      expect(frame).toContain('\u001b[38;2;247;244;242m');
+    } finally {
+      inkChalk.level = originalLevel;
+    }
+  });
+
+  it('uses configured panel, heading, accent, and priority colors', () => {
+    const originalLevel = inkChalk.level;
+    inkChalk.level = 3;
+    try {
+      const task = createTask({title: 'Ship release', priority: 'high'}, now);
+      const view = render(<Dashboard tasks={[task]} width={150} now={() => now} settings={{borderColor: '#123456', titleColor: '#234567', accentColor: '#345678', priorityColors: {low: '#86EFAC', medium: '#93C5FD', high: '#456789', urgent: '#FDA4AF'}}} />);
+      const frame = view.lastFrame() ?? '';
+      expect(frame).toContain('\u001b[38;2;18;52;86m');
+      expect(frame).toContain('\u001b[38;2;35;69;103mTODO DASHBOARD');
+      expect(frame).toContain('\u001b[38;2;52;86;120m');
+      expect(frame).toContain('\u001b[38;2;69;103;137m[HIGH]');
+    } finally { inkChalk.level = originalLevel; }
+  });
+
+  it('shows only configured columns in the requested order', () => {
+    const task = createTask({title: 'Pay bill', deadlineAt: '2026-09-20T12:00:00.000Z'}, now);
+    const view = render(<Dashboard tasks={[task]} width={180} now={() => now} settings={{visibleColumns: ['task', 'dueIn', 'priority']}} />);
+    const frame = view.lastFrame() ?? '';
+    expect(frame).toMatch(/TASK\s+DUE IN\s+PRIORITY/);
+    expect(frame).toContain('Pay bill');
+    expect(frame).toContain('2h');
+    expect(frame).toContain('[MEDIUM]');
+    expect(frame).not.toContain('EFFORT LEFT');
+    expect(frame).not.toContain('HEALTH');
+    expect(frame).not.toContain('STATE');
+  });
+
+  it('honors the visible column list on narrow terminals', () => {
+    const task = createTask({title: 'Pay bill', deadlineAt: '2026-09-20T12:00:00.000Z'}, now);
+    const view = render(<Dashboard tasks={[task]} width={40} now={() => now} settings={{visibleColumns: ['task', 'dueIn']}} />);
+    const frame = view.lastFrame() ?? '';
+    expect(frame).toContain('Pay bill');
+    expect(frame).toContain('2h');
+    expect(frame).not.toContain('[MEDIUM]');
+    expect(frame).not.toContain('UNKNOWN');
+    expect(frame).not.toContain('effort left');
+  });
+  it('shows a color coded priority badge in its own column', () => {
+    const originalLevel = inkChalk.level;
+    inkChalk.level = 3;
+    try {
+      const task = createTask({title: 'Ship release', priority: 'high'}, now);
+      const view = render(<Dashboard tasks={[task]} width={150} now={() => now} />);
+      const frame = view.lastFrame() ?? '';
+      expect(frame).toContain('PRIORITY');
+      expect(frame).toContain('[HIGH]');
+      expect(frame).toMatch(/\[38;2;[^m]+m\[HIGH\]/);
+    } finally {
+      inkChalk.level = originalLevel;
+    }
+  });
+
+  it('uses separate rounded panels, pastel accents, and a highlighted selection', () => {
+    const originalLevel = inkChalk.level;
+    inkChalk.level = 3;
+    try {
+      const view = render(<Dashboard tasks={tasks} width={100} now={() => now} />);
+      const frame = view.lastFrame() ?? '';
+      expect((frame.match(/╭/g) ?? []).length).toBeGreaterThanOrEqual(2);
+      expect(frame).toContain('TODO DASHBOARD');
+      expect(frame).toContain('TASKS');
+      const escape = String.fromCharCode(27);
+      expect(frame).toContain(`${escape}[38;2;`);
+      expect(frame).toContain(`${escape}[48;2;`);
+      const unselectedTaskLine = frame.split('\n').find(line => line.includes('Second task')) ?? '';
+      const beforeUnselectedState = (unselectedTaskLine.split('│')[1] ?? '').split('RUNNING')[0] ?? '';
+      expect(beforeUnselectedState).toContain(`${escape}[38;2;`);
+    } finally {
+      inkChalk.level = originalLevel;
+    }
+  });
+
+  it('uses ASCII borders without escape codes in monochrome mode', () => {
+    const originalLevel = inkChalk.level;
+    inkChalk.level = 3;
+    try {
+      const view = render(<Dashboard tasks={tasks} settings={{monochrome: true, symbols: 'ascii'}} width={80} now={() => now} />);
+      const frame = view.lastFrame() ?? '';
+      expect((frame.match(/\+-+/g) ?? []).length).toBeGreaterThanOrEqual(2);
+      expect(frame).toContain('First task');
+      expect(frame).not.toContain('\u001b[');
+    } finally {
+      inkChalk.level = originalLevel;
+    }
+  });
+
+  it('keeps the help screen inside a distinct bordered panel', async () => {
+    const view = render(<Dashboard tasks={tasks} width={100} now={() => now} />);
+    view.stdin.write('?');
+    await vi.waitFor(() => expect(view.lastFrame()).toContain('Keyboard shortcuts'));
+    expect(view.lastFrame()).toContain('╭');
+    expect(view.lastFrame()).toContain('╰');
+  });
+
+  it('shows the settings shortcut in the home-screen footer', () => {
+    const view = render(<Dashboard tasks={tasks} width={100} now={() => now} />);
+    expect(view.lastFrame()).toContain(', settings');
+  });
+
+  it('shows search entry and exit shortcuts in the footer', async () => {
+    const view = render(<Dashboard tasks={tasks} width={100} now={() => now} />);
+    expect(view.lastFrame()).toContain('/ search');
+    view.stdin.write('/');
+    await vi.waitFor(() => expect(view.lastFrame()).toContain('Enter/Esc exit search'));
+  });
+
   it('renders a plain adaptive task view with text health and no ANSI when monochrome', () => {
     const view = render(<Dashboard tasks={tasks} settings={{monochrome: true, symbols: 'ascii'}} width={120} now={() => now} />);
     expect(view.lastFrame()).toContain('TODO DASHBOARD');
     expect(view.lastFrame()).toContain('First task');
     expect(view.lastFrame()).toContain('UNKNOWN');
     expect(view.lastFrame()).not.toContain(String.fromCharCode(27));
+  });
+
+  it('shows effort remaining separately from the deadline and its countdown', () => {
+    const deadlineAt = '2026-09-21T13:00:00.000Z';
+    const task = {...createTask({title: 'Ship release', estimateMs: 14_400_000, deadlineAt}, now), trackedMs: 3_600_000};
+    const view = render(<Dashboard tasks={[task]} width={140} now={() => now} />);
+    Object.defineProperty(view.stdout, 'columns', {value: 140, configurable: true});
+    view.stdout.emit('resize');
+    const frame = view.lastFrame() ?? '';
+    expect(frame).toContain('EFFORT LEFT');
+    expect(frame).toContain('DEADLINE');
+    expect(frame).toContain('DUE IN');
+    expect(frame).toContain('3h');
+    expect(frame).toContain('1d 3h');
+  });
+
+  it('retains progress when the terminal is wide enough for all timing columns', () => {
+    const task = {...createTask({title: 'Ship release', estimateMs: 14_400_000, deadlineAt: '2026-09-21T13:00:00.000Z'}, now), trackedMs: 3_600_000};
+    const view = render(<Dashboard tasks={[task]} width={180} now={() => now} />);
+    Object.defineProperty(view.stdout, 'columns', {value: 180, configurable: true});
+    view.stdout.emit('resize');
+    const frame = view.lastFrame() ?? '';
+    expect(frame).toContain('PROGRESS');
+    expect(frame).toContain('25%');
+    expect(frame).toContain('DUE IN');
+  });
+
+  it('shows the deadline countdown even when a task has no effort estimate on medium terminals', () => {
+    const task = createTask({title: 'Pay bill', deadlineAt: '2026-09-20T12:00:00.000Z'}, now);
+    const view = render(<Dashboard tasks={[task]} width={100} now={() => now} />);
+    const frame = view.lastFrame() ?? '';
+    expect(frame).toContain('EFFORT LEFT');
+    expect(frame).toContain('DUE IN');
+    expect(frame).toMatch(/Pay bill\s+—\s+2h/);
+  });
+
+  it('keeps both timing values accessible for the selected task on narrow terminals', () => {
+    const task = createTask({title: 'Pay bill', estimateMs: 3_600_000, deadlineAt: '2026-09-20T12:00:00.000Z'}, now);
+    const view = render(<Dashboard tasks={[task]} width={40} now={() => now} />);
+    const frame = view.lastFrame() ?? '';
+    expect(frame).toContain('effort left 1h');
+    expect(frame).toContain('due in 2h');
   });
 
   it('uses a compact layout on narrow terminals', () => {
@@ -52,5 +235,329 @@ describe('Dashboard', () => {
     view.stdin.write('Ship it');
     view.stdin.write('\r');
     await vi.waitFor(() => expect(submit).toHaveBeenCalledWith('Ship it'));
+  });
+});
+
+describe('task editor deadline', () => {
+  it('rejects a blank task title before moving to later steps', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'todo-tui-title-'));
+    const service = new TodoService(new StoreRepository(join(directory, 'store.json')));
+    const view = render(<TodoApp service={service} />);
+    try {
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('No tasks'));
+      view.stdin.write('n');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Task title'));
+      view.stdin.write('\r');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Title is required'));
+      expect(view.lastFrame()).toContain('Task title');
+    } finally {
+      view.unmount();
+      await rm(directory, {recursive: true, force: true});
+    }
+  });
+
+  it('rejects an invalid estimate at its own step so the final time can save', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'todo-tui-estimate-'));
+    const service = new TodoService(new StoreRepository(join(directory, 'store.json')));
+    const view = render(<TodoApp service={service} />);
+    try {
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('No tasks'));
+      view.stdin.write('n');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Task title'));
+      view.stdin.write('Plan release');
+      view.stdin.write('\r');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Estimate'));
+      view.stdin.write('two hours');
+      view.stdin.write('\r');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('positive duration'));
+      expect(view.lastFrame()).toContain('Estimate');
+    } finally {
+      view.unmount();
+      await rm(directory, {recursive: true, force: true});
+    }
+  });
+
+  it('creates a task after entering a deadline time in HH:mm format', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'todo-tui-time-'));
+    const service = new TodoService(new StoreRepository(join(directory, 'store.json')));
+    const view = render(<TodoApp service={service} />);
+    try {
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('No tasks'));
+      view.stdin.write('n');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Task title'));
+      view.stdin.write('Plan release');
+      view.stdin.write('\r');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Estimate'));
+      view.stdin.write('\r');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Priority'));
+      view.stdin.write('\r');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Deadline date'));
+      view.stdin.write('2026-10-10');
+      view.stdin.write('\r');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Deadline time'));
+      view.stdin.write('20:10');
+      view.stdin.write('\r');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Task created'));
+      const task = (await service.list())[0];
+      expect(task?.deadlineAt).not.toBeNull();
+      expect(new Date(task!.deadlineAt!).getHours()).toBe(20);
+      expect(new Date(task!.deadlineAt!).getMinutes()).toBe(10);
+    } finally {
+      view.unmount();
+      await rm(directory, {recursive: true, force: true});
+    }
+  });
+
+  it('edits border color and visible columns from settings', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'todo-tui-settings-'));
+    const service = new TodoService(new StoreRepository(join(directory, 'store.json')));
+    const view = render(<TodoApp service={service} />);
+    try {
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('TODO DASHBOARD'));
+      view.stdin.write(',');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Settings'));
+      view.stdin.write('b');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Border color'));
+      view.stdin.write('#123456');
+      view.stdin.write('\r');
+      await vi.waitFor(() => {
+        expect(view.lastFrame()).toContain('Settings');
+        expect(view.lastFrame()).toContain('#123456');
+      });
+      view.stdin.write('v');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Visible columns'));
+      view.stdin.write('task,dueIn');
+      view.stdin.write('\r');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('task,dueIn'));
+      expect(await service.getConfig('borderColor')).toBe('#123456');
+      expect(await service.getConfig('visibleColumns')).toEqual(['task', 'dueIn']);
+    } finally {
+      view.unmount();
+      await rm(directory, {recursive: true, force: true});
+    }
+  });
+
+  it('cycles and saves named color themes from settings', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'todo-tui-theme-'));
+    const service = new TodoService(new StoreRepository(join(directory, 'store.json')));
+    const view = render(<TodoApp service={service} />);
+    try {
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('TODO DASHBOARD'));
+      view.stdin.write(',');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Settings'));
+      view.stdin.write('p');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('theme: Lavender dusk'));
+      expect(await service.getConfig('colorTheme')).toBe('lavender-dusk');
+      view.stdin.write('p');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('theme: Sage & cream'));
+      expect(await service.getConfig('colorTheme')).toBe('sage-cream');
+    } finally {
+      view.unmount();
+      await rm(directory, {recursive: true, force: true});
+    }
+  });
+
+  it('previews the selected theme inside settings', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'todo-tui-theme-preview-'));
+    const service = new TodoService(new StoreRepository(join(directory, 'store.json')));
+    const originalLevel = inkChalk.level;
+    const originalNoColor = process.env.NO_COLOR;
+    delete process.env.NO_COLOR;
+    inkChalk.level = 3;
+    const view = render(<TodoApp service={service} />);
+    try {
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('TODO DASHBOARD'));
+      view.stdin.write(',');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Settings'));
+      view.stdin.write('p');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Lavender dusk'));
+      const frame = view.lastFrame() ?? '';
+      expect(frame).toContain('\u001b[38;2;169;154;200m╭');
+      expect(frame).toContain('\u001b[48;2;55;51;72m');
+    } finally {
+      view.unmount();
+      inkChalk.level = originalLevel;
+      if (originalNoColor === undefined) delete process.env.NO_COLOR;
+      else process.env.NO_COLOR = originalNoColor;
+      await rm(directory, {recursive: true, force: true});
+    }
+  });
+
+  it('sets a task priority during creation', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'todo-tui-priority-'));
+    const service = new TodoService(new StoreRepository(join(directory, 'store.json')));
+    const view = render(<TodoApp service={service} />);
+    try {
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('No tasks'));
+      view.stdin.write('n');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Task title'));
+      view.stdin.write('Ship release');
+      view.stdin.write('\r');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Estimate'));
+      view.stdin.write('\r');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Priority'));
+      for (let index = 0; index < 6; index++) view.stdin.write('\b');
+      view.stdin.write('urgent');
+      view.stdin.write('\r');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Deadline date'));
+      view.stdin.write('\r');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Task created'));
+      expect((await service.list())[0]?.priority).toBe('urgent');
+    } finally {
+      view.unmount();
+      await rm(directory, {recursive: true, force: true});
+    }
+  });
+
+  it('keeps an invalid date editable and lets a blank date create a task without a deadline', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'todo-tui-test-'));
+    const service = new TodoService(new StoreRepository(join(directory, 'store.json')));
+    const view = render(<TodoApp service={service} />);
+    try {
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('No tasks'));
+      view.stdin.write('n');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Task title'));
+      view.stdin.write('Write docs');
+      view.stdin.write('\r');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Estimate'));
+      view.stdin.write('\r');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Priority'));
+      view.stdin.write('\r');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Deadline date'));
+      view.stdin.write('wrong');
+      view.stdin.write('\r');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Enter a valid date'));
+      expect(view.lastFrame()).toContain('wrong');
+      for (let index = 0; index < 5; index++) view.stdin.write('\b');
+      view.stdin.write('\r');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Task created'));
+      expect((await service.list())[0]).toMatchObject({title: 'Write docs', deadlineAt: null});
+    } finally {
+      view.unmount();
+      await rm(directory, {recursive: true, force: true});
+    }
+  });
+});
+
+describe('task screen layout', () => {
+  it('keeps appearance editing inside the same rounded frame', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'todo-tui-appearance-'));
+    const service = new TodoService(new StoreRepository(join(directory, 'store.json')));
+    const view = render(<TodoApp service={service} />);
+    try {
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('TODO DASHBOARD'));
+      const dashboardFrame = view.lastFrame() ?? '';
+      const dashboardHeight = dashboardFrame.split('\n').length;
+      const dashboardWidth = dashboardFrame.split('\n').find(line => line.startsWith('╭'))?.length;
+      view.stdin.write(',');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Settings'));
+      view.stdin.write('b');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Border color'));
+      const frame = view.lastFrame() ?? '';
+      expect(frame).toContain('╭');
+      expect(frame).toContain('╰');
+      expect(frame.split('\n')).toHaveLength(dashboardHeight);
+      expect(frame.split('\n').find(line => line.startsWith('╭'))?.length).toBe(dashboardWidth);
+    } finally {
+      view.unmount();
+      await rm(directory, {recursive: true, force: true});
+    }
+  });
+
+  it('frames delete confirmation at dashboard width and height with a warning', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'todo-tui-delete-'));
+    const service = new TodoService(new StoreRepository(join(directory, 'store.json')));
+    await service.add('Write docs');
+    const view = render(<TodoApp service={service} />);
+    try {
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Write docs'));
+      const dashboardFrame = view.lastFrame() ?? '';
+      const dashboardHeight = dashboardFrame.split('\n').length;
+      const dashboardWidth = dashboardFrame.split('\n').find(line => line.startsWith('╭'))?.length;
+      view.stdin.write('d');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Delete "Write docs"?'));
+      const frame = view.lastFrame() ?? '';
+      expect(frame).toContain('This cannot be undone.');
+      expect(frame).toContain('╭');
+      expect(frame).toContain('╰');
+      expect(frame.split('\n')).toHaveLength(dashboardHeight);
+      expect(frame.split('\n').find(line => line.startsWith('╭'))?.length).toBe(dashboardWidth);
+      expect(await service.list()).toHaveLength(1);
+      view.stdin.write('n');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Deletion cancelled'));
+      expect(await service.list()).toHaveLength(1);
+    } finally {
+      view.unmount();
+      await rm(directory, {recursive: true, force: true});
+    }
+  });
+
+  it('cancels the delete prompt with Escape without removing the task', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'todo-tui-delete-escape-'));
+    const service = new TodoService(new StoreRepository(join(directory, 'store.json')));
+    await service.add('Write docs');
+    const view = render(<TodoApp service={service} />);
+    try {
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Write docs'));
+      view.stdin.write('d');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Delete "Write docs"?'));
+      view.stdin.write('\u001b');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Deletion cancelled'));
+      expect(await service.list()).toHaveLength(1);
+    } finally {
+      view.unmount();
+      await rm(directory, {recursive: true, force: true});
+    }
+  });
+
+  it('groups task details in an inner card with effort and deadline timing', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'todo-tui-details-'));
+    const service = new TodoService(new StoreRepository(join(directory, 'store.json')));
+    await service.add('Write docs', {estimate: '3h', due: '2026-09-25'});
+    const view = render(<TodoApp service={service} />);
+    try {
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Write docs'));
+      view.stdin.write('\r');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('TASK DETAILS'));
+      const frame = view.lastFrame() ?? '';
+      expect((frame.match(/╭/g) ?? []).length).toBe(2);
+      expect(frame).toContain('Status: pending');
+      expect(frame).toContain('Tracked: 0s');
+      expect(frame).toContain('Effort left: 3h');
+      expect(frame).toContain('Deadline:');
+      expect(frame).toContain('Due in:');
+    } finally {
+      view.unmount();
+      await rm(directory, {recursive: true, force: true});
+    }
+  });
+
+  it.each([
+    {screen: 'details', key: '\r', content: 'Status: pending', taskCount: 1},
+    {screen: 'edit', key: 'e', content: 'Task title', taskCount: 1},
+    {screen: 'details', key: '\r', content: 'Status: pending', taskCount: 3},
+    {screen: 'edit', key: 'e', content: 'Task title', taskCount: 3}
+  ])('keeps the $screen screen as wide and tall as the dashboard with $taskCount task(s)', async ({key, content, taskCount}) => {
+    const directory = await mkdtemp(join(tmpdir(), 'todo-tui-layout-'));
+    const service = new TodoService(new StoreRepository(join(directory, 'store.json')));
+    await service.add('Write docs');
+    for (let index = 1; index < taskCount; index++) await service.add(`Task ${index + 1}`);
+    const view = render(<TodoApp service={service} />);
+    try {
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Write docs'));
+      const dashboardFrame = view.lastFrame() ?? '';
+      const dashboardHeight = dashboardFrame.split('\n').length;
+      const dashboardWidth = dashboardFrame.split('\n').find(line => line.startsWith('╭'))?.length;
+      view.stdin.write(key);
+      await vi.waitFor(() => expect(view.lastFrame()).toContain(content));
+      const modalFrame = view.lastFrame() ?? '';
+      expect(modalFrame).toContain('╭');
+      expect(modalFrame).toContain('╰');
+      expect(modalFrame.split('\n').length).toBe(dashboardHeight);
+      expect(modalFrame.split('\n').find(line => line.startsWith('╭'))?.length).toBe(dashboardWidth);
+    } finally {
+      view.unmount();
+      await rm(directory, {recursive: true, force: true});
+    }
   });
 });
