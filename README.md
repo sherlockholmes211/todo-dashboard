@@ -117,14 +117,6 @@ npm run build
 npm pack --dry-run
 ```
 
-The package is published as `todo-dashboard` and exposes the `todo` executable. To release a new version, update the package metadata with npm and publish the generated build:
-
-```sh
-npm version patch --no-git-tag-version
-npm run build
-npm publish
-```
-
 ## License
 
 MIT
