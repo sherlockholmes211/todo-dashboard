@@ -109,7 +109,9 @@ export function TextPrompt({label, initial = '', error, onSubmit, onCancel}: {
   return <Box flexDirection="column"><Text>{label}</Text><Text>&gt; {value}█</Text>{error && <Text color="red">{error}</Text>}<Text dimColor>Enter confirms · Esc cancels</Text></Box>;
 }
 
-export function Dashboard({tasks, settings: overrides, width = process.stdout.columns ?? 80, now = () => new Date(), onAction}: DashboardProps) {
+export function Dashboard({tasks, settings: overrides, width: requestedWidth, now = () => new Date(), onAction}: DashboardProps) {
+  const width = requestedWidth ?? process.stdout.columns ?? 80;
+  const panelWidth: number | '100%' = requestedWidth === undefined ? '100%' : width;
   const settings = {...defaultSettings, ...overrides};
   const palette = screenPalette(settings);
   const textColor = (value: string) => settings.monochrome ? {} : {color: value};
@@ -156,7 +158,7 @@ export function Dashboard({tasks, settings: overrides, width = process.stdout.co
     else if (input === 'o') setSort(value => value === 'created' ? 'deadline' : value === 'deadline' ? 'title' : value === 'title' ? 'health' : 'created');
   });
 
-  if (help) return <Box borderStyle={borderStyle} {...borderColor} flexDirection="column" paddingX={1} width="100%">
+  if (help) return <Box borderStyle={borderStyle} {...borderColor} flexDirection="column" paddingX={1} width={panelWidth}>
     <Text bold={!settings.monochrome} {...textColor(palette.title)}>Keyboard shortcuts</Text>
     <Text>j/k or arrows navigate · Enter details · n new · e edit · s start · p pause · P pause all</Text>
     <Text>c complete · r reopen · d delete · / search · o sort · , settings · ? help · q quit</Text>
@@ -169,12 +171,12 @@ export function Dashboard({tasks, settings: overrides, width = process.stdout.co
   const columns = settings.visibleColumns;
   const selectedTime = now();
   const selectedWorkLeft = active ? getMetrics(active, selectedTime).workLeftMs : null;
-  return <Box flexDirection="column" width="100%">
-    <Box borderStyle={borderStyle} {...borderColor} flexDirection="column" paddingX={1} width="100%">
+  return <Box flexDirection="column" width={panelWidth}>
+    <Box borderStyle={borderStyle} {...borderColor} flexDirection="column" paddingX={1} width={panelWidth}>
       <Text bold={!settings.monochrome} {...textColor(palette.title)}>TODO DASHBOARD</Text>
       <Text {...textColor(palette.accent)}>{visible.length} tasks · filter {filter} · sort {sort}{query ? ` · search: ${query}` : ''}{searching ? '█' : ''}</Text>
     </Box>
-    <Box marginTop={1} borderStyle={borderStyle} {...borderColor} flexDirection="column" paddingX={1} width="100%">
+    <Box marginTop={1} borderStyle={borderStyle} {...borderColor} flexDirection="column" paddingX={1} width={panelWidth}>
       <Text bold={!settings.monochrome} {...textColor(palette.title)}>TASKS</Text>
       {layout !== 'narrow' && <Text bold={!settings.monochrome} {...textColor(palette.accent)}>{customColumns ? `  ${columns.map(column => columnLabels[column].padEnd(columnWidths[column])).join('')}` : layout === 'wide' ? `  ID        STATE       TASK                      TRACKED   EFFORT LEFT  DEADLINE          DUE IN       ${showProgress ? `${'PROGRESS'.padEnd(settings.progressBarWidth + 6)} ` : ''}PRIORITY  HEALTH` : '  STATE       TASK                EFFORT LEFT  DUE IN       PRIORITY  HEALTH'}</Text>}
       {visible.length === 0 && <Text>No tasks. Press n to create one.</Text>}
