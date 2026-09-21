@@ -320,7 +320,10 @@ describe('task editor deadline', () => {
       await vi.waitFor(() => expect(view.lastFrame()).toContain('Border color'));
       view.stdin.write('#123456');
       view.stdin.write('\r');
-      await vi.waitFor(() => expect(view.lastFrame()).toContain('#123456'));
+      await vi.waitFor(() => {
+        expect(view.lastFrame()).toContain('Settings');
+        expect(view.lastFrame()).toContain('#123456');
+      });
       view.stdin.write('v');
       await vi.waitFor(() => expect(view.lastFrame()).toContain('Visible columns'));
       view.stdin.write('task,dueIn');
