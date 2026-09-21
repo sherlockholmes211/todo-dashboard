@@ -3,9 +3,30 @@ import * as chrono from 'chrono-node';
 import {z} from 'zod';
 
 export const TITLE_MAX_LENGTH = 200;
+export const colorThemeIds = ['default', 'lavender-dusk', 'sage-cream', 'misty-blue', 'rose-slate', 'soft-amber', 'quiet-monochrome', 'high-contrast'] as const;
+export const prioritySchema = z.enum(['low', 'medium', 'high', 'urgent']);
+export type Priority = z.infer<typeof prioritySchema>;
+
+export function parsePriority(value: string): Priority {
+  const result = prioritySchema.safeParse(value.trim().toLowerCase());
+  if (!result.success) throw new Error('Priority must be low, medium, high, or urgent');
+  return result.data;
+}
 
 export const settingsSchema = z.object({
-  colorTheme: z.enum(['default', 'high-contrast']).default('default'),
+  colorTheme: z.enum(colorThemeIds).default('default'),
+  borderColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().default(null),
+  titleColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().default(null),
+  accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().default(null),
+  selectedBackgroundColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().default(null),
+  selectedTextColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().default(null),
+  priorityColors: z.object({
+    low: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+    medium: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+    high: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+    urgent: z.string().regex(/^#[0-9a-fA-F]{6}$/)
+  }).default({low: '#86EFAC', medium: '#93C5FD', high: '#FDE68A', urgent: '#FDA4AF'}),
+  visibleColumns: z.array(z.enum(['id', 'state', 'task', 'tracked', 'effortLeft', 'deadline', 'dueIn', 'progress', 'priority', 'health'])).min(1).refine(columns => new Set(columns).size === columns.length, 'Columns must be unique').default(['id', 'state', 'task', 'tracked', 'effortLeft', 'deadline', 'dueIn', 'progress', 'priority', 'health']),
   monochrome: z.boolean().default(false),
   symbols: z.enum(['unicode', 'ascii']).default('unicode'),
   progressBarWidth: z.number().int().min(5).max(60).default(20),
@@ -37,6 +58,7 @@ export const taskSchema = z.object({
     'Title must not contain control characters'
   ),
   status: z.enum(['pending', 'in_progress', 'completed']),
+  priority: prioritySchema.default('medium'),
   estimateMs: z.number().positive().nullable(),
   trackedMs: z.number().nonnegative(),
   activeSince: z.string().datetime().nullable(),
@@ -108,7 +130,7 @@ export function parseDeadline(input: string, now = new Date(), defaultTime = '23
   return parsed.toISOString();
 }
 
-type CreateTaskInput = {title: string; estimateMs?: number | null; deadlineAt?: string | null};
+type CreateTaskInput = {title: string; estimateMs?: number | null; deadlineAt?: string | null; priority?: Priority};
 
 export function createTask(input: CreateTaskInput, now = new Date(), id: string = randomUUID()): Task {
   const iso = now.toISOString();
@@ -116,6 +138,7 @@ export function createTask(input: CreateTaskInput, now = new Date(), id: string 
     id,
     title: input.title,
     status: 'pending',
+    priority: input.priority ?? 'medium',
     estimateMs: input.estimateMs ?? null,
     trackedMs: 0,
     activeSince: null,
@@ -164,6 +187,7 @@ export function reopenTask(task: Task, now = new Date()): Task {
 
 type TaskChanges = {
   title?: string;
+  priority?: Priority;
   estimateMs?: number | null;
   remainingMs?: number;
   deadlineAt?: string | null;
@@ -178,6 +202,7 @@ export function updateTask(task: Task, changes: TaskChanges, now = new Date()): 
   return taskSchema.parse({
     ...task,
     ...(changes.title === undefined ? {} : {title: changes.title}),
+    ...(changes.priority === undefined ? {} : {priority: changes.priority}),
     ...(changes.deadlineAt === undefined ? {} : {deadlineAt: changes.deadlineAt}),
     estimateMs,
     updatedAt: now.toISOString()

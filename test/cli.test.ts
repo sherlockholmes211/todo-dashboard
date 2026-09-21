@@ -56,6 +56,19 @@ describe('CLI', () => {
     expect(JSON.parse(shown.stdout).title).toBe('Build release');
   });
 
+  it('sets and edits priority through the CLI', async () => {
+    const added = await run(['add', 'Ship release', '--priority', 'high', '--json']);
+    expect(added.code).toBe(0);
+    const task = JSON.parse(added.stdout);
+    expect(task.priority).toBe('high');
+    const edited = await run(['edit', task.id, '--priority', 'urgent']);
+    expect(edited.code).toBe(0);
+    expect((await service.show(task.id)).priority).toBe('urgent');
+    const invalid = await run(['edit', task.id, '--priority', 'critical']);
+    expect(invalid.code).toBe(1);
+    expect((await service.show(task.id)).priority).toBe('urgent');
+  });
+
   it('sends validation errors to stderr with a nonzero code', async () => {
     const result = await run(['add', ' ', '--estimate', 'nonsense']);
     expect(result.code).toBe(1);
@@ -80,6 +93,13 @@ describe('CLI', () => {
     expect((await run(['config', 'set', 'clock', '12h'])).code).toBe(0);
     expect((await run(['config', 'get', 'clock'])).stdout.trim()).toBe('12h');
     expect((await run(['doctor'])).stdout).toMatch(/healthy/i);
+  });
+
+  it('prints configured color maps as JSON', async () => {
+    const result = await run(['config', 'set', 'priorityColors', '{"high":"#112233"}']);
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout.slice('priorityColors='.length))).toMatchObject({high: '#112233'});
+    expect(JSON.parse((await run(['config', 'get', 'priorityColors'])).stdout)).toMatchObject({high: '#112233'});
   });
 
   it('selects TUI only when no command and both streams are terminals', () => {

@@ -25,6 +25,7 @@ export async function executeCli(args: string[], dependencies: CliDependencies):
   const {service, stdout, stderr} = dependencies;
   const output = (value: unknown, json = false) => stdout(json ? `${JSON.stringify(value, null, 2)}\n` : `${String(value)}\n`);
   const taskOutput = (task: Awaited<ReturnType<TodoService['show']>>, json = false) => output(json ? taskToJson(task) : formatTask(task), json);
+  const configValue = (value: unknown) => typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value);
   const program = new Command()
     .name('todo')
     .description('Task dashboard with concurrent timers')
@@ -35,9 +36,10 @@ export async function executeCli(args: string[], dependencies: CliDependencies):
   program.command('add')
     .argument('<title>')
     .option('--estimate <duration>')
+    .option('--priority <level>')
     .option('--due <deadline>')
     .option('--json')
-    .action(async (title: string, options: {estimate?: string; due?: string; json?: boolean}) => {
+    .action(async (title: string, options: {estimate?: string; due?: string; priority?: string; json?: boolean}) => {
       taskOutput(await service.add(title, options), options.json);
     });
 
@@ -58,6 +60,7 @@ export async function executeCli(args: string[], dependencies: CliDependencies):
   program.command('edit')
     .argument('<id>')
     .option('--title <text>')
+    .option('--priority <level>')
     .option('--estimate <duration>')
     .option('--remaining <duration>')
     .option('--due <deadline>')
@@ -91,10 +94,10 @@ export async function executeCli(args: string[], dependencies: CliDependencies):
 
   const config = program.command('config');
   config.command('list').action(async () => output(await service.listConfig(), true));
-  config.command('get').argument('<key>').action(async (key: string) => output(await service.getConfig(key)));
+  config.command('get').argument('<key>').action(async (key: string) => output(configValue(await service.getConfig(key))));
   config.command('set').argument('<key>').argument('<value>').action(async (key: string, value: string) => {
     await service.setConfig(key, value);
-    output(`${key}=${String(await service.getConfig(key))}`);
+    output(`${key}=${configValue(await service.getConfig(key))}`);
   });
 
   program.command('doctor')

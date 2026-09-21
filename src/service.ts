@@ -3,6 +3,7 @@ import {
   createTask,
   parseDeadline,
   parseDuration,
+  parsePriority,
   pauseTask,
   reopenTask,
   settingsSchema,
@@ -16,9 +17,10 @@ import {
 } from './domain.js';
 import {StoreRepository} from './storage.js';
 
-type AddOptions = {estimate?: string; due?: string};
+type AddOptions = {estimate?: string; due?: string; priority?: string};
 type EditOptions = {
   title?: string;
+  priority?: string;
   estimate?: string;
   remaining?: string;
   due?: string;
@@ -41,6 +43,7 @@ export class TodoService {
     await this.repository.mutate(store => {
       created = createTask({
         title,
+        priority: options.priority ? parsePriority(options.priority) : 'medium',
         estimateMs: options.estimate ? parseDuration(options.estimate) : null,
         deadlineAt: options.due ? parseDeadline(options.due, this.now(), store.settings.defaultDeadlineTime) : null
       }, this.now(), id);
@@ -70,6 +73,7 @@ export class TodoService {
         : undefined;
       result = updateTask(current, {
         ...(options.title === undefined ? {} : {title: options.title}),
+        ...(options.priority === undefined ? {} : {priority: parsePriority(options.priority)}),
         ...(options.clearEstimate ? {estimateMs: null} : options.estimate ? {estimateMs: parseDuration(options.estimate)} : {}),
         ...(options.remaining ? {remainingMs: parseDuration(options.remaining)} : {}),
         ...(deadlineAt === undefined ? {} : {deadlineAt})
@@ -137,8 +141,13 @@ export class TodoService {
         value = rawValue === 'true';
       } else if (typeof current === 'number') {
         value = Number(rawValue);
+      } else if (key.endsWith('Color')) {
+        value = rawValue === 'default' ? null : rawValue;
+      } else if (key === 'visibleColumns') {
+        value = rawValue.split(',').map(column => column.trim());
       } else if (typeof current === 'object') {
         try { value = JSON.parse(rawValue); } catch { throw new Error(`${key} must be valid JSON`); }
+        if ((key === 'priorityColors' || key === 'healthColors') && value && typeof value === 'object' && !Array.isArray(value)) value = {...current, ...value};
       }
       settings = settingsSchema.parse({...store.settings, [key]: value});
       return {...store, settings};
