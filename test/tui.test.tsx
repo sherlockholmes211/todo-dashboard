@@ -207,6 +207,14 @@ describe('Dashboard', () => {
     expect(view.lastFrame()).toContain(', settings');
   });
 
+  it('shows task and timer shortcuts below the task panel', () => {
+    const view = render(<Dashboard tasks={tasks} width={180} now={() => now} />);
+    const footer = (view.lastFrame() ?? '').split('╰').at(-1) ?? '';
+    for (const shortcut of ['Enter details', 'n new', 'e edit', 's start', 'p pause', 'P pause all', 'c complete', 'r reopen', 'd delete']) {
+      expect(footer).toContain(shortcut);
+    }
+  });
+
   it('shows search entry and exit shortcuts in the footer', async () => {
     const view = render(<Dashboard tasks={tasks} width={100} now={() => now} />);
     expect(view.lastFrame()).toContain('/ search');
