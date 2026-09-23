@@ -10,6 +10,7 @@ Requires Node.js 22.12 or newer.
 - Concurrent timers: multiple tasks can run at the same time and keep tracking after the dashboard closes.
 - Estimates, tracked time, effort remaining, progress, deadlines, Due In countdowns, and task health.
 - Four priority levels: `low`, `medium`, `high`, and `urgent`.
+- Optional task descriptions, shown when opening a task but omitted from dashboard rows.
 - Search, filtering, sorting, keyboard shortcuts, task details, and interactive task creation/editing.
 - Eight color themes, monochrome mode, ASCII borders, custom colors, and configurable visible columns.
 - Script-friendly CLI output, JSON output, automatic backups, file locking, atomic writes, and store recovery diagnostics.
@@ -38,10 +39,10 @@ todo
 ## Commands
 
 ```sh
-todo add "Write release notes" --estimate "2h" --priority high --due "tomorrow 6pm"
+todo add "Write release notes" --description "Cover the launch changes" --estimate "2h" --priority high --due "tomorrow 6pm"
 todo list [--all] [--json]
 todo show <id> [--json]
-todo edit <id> [--title <text>] [--priority <level>] [--estimate <duration>] [--remaining <duration>]
+todo edit <id> [--title <text>] [--description <text>] [--priority <level>] [--estimate <duration>] [--remaining <duration>]
                     [--due <deadline>] [--clear-estimate] [--clear-due]
 todo start <id>
 todo pause <id>
@@ -67,13 +68,15 @@ The dashboard separates **Effort Left** (estimate minus tracked time) from **Due
 
 `↑`/`↓` or `j`/`k` navigate, `Enter` shows details, `n` creates, `e` edits, `s` starts, `p` pauses, `P` pauses all, `c` completes, `r` reopens, `d` deletes, `/` searches, `o` changes sorting, `,` opens settings, `?` shows help, and `q` quits.
 
+In Edit Task, use `↑`/`↓` or `Tab` to select a field and `Enter` to edit it. Use `←`/`→` to choose a priority; the highlighted arrow shows the last direction. Priority does not accept typed input. Date and time fields support both typing and picker keys. Press `s` to save all changes. `Esc` leaves the active field without applying it; press `Esc` again to cancel the form. New Task guides you through the fields in order, ending with an optional description.
+
 The interactive dashboard uses pastel accents and bordered panels. Press `,` then `m` to switch to monochrome, or `,` then `u` to use ASCII borders and symbols. `NO_COLOR=1 todo` also disables dashboard colors.
 
 ### Dashboard appearance
 
-Press `,` for settings, then `p` to cycle through the color themes. The settings screen previews each theme's border and selected row. Themes are `default`, `lavender-dusk`, `sage-cream`, `misty-blue`, `rose-slate`, `soft-amber`, `quiet-monochrome`, and `high-contrast`. The default theme remains unchanged.
+Press `,` for settings. Use `↑`/`↓` or `j`/`k` to select a setting, then `Enter` to change it. A miniature task dashboard beside the settings shows the current colors. On the theme row, use `←`/`→` to move through themes, or press `Enter` or `p` to move forward. Themes are `default`, `lavender-dusk`, `sage-cream`, `misty-blue`, `rose-slate`, `soft-amber`, `quiet-monochrome`, and `high-contrast`.
 
-Use `b` for the border color, `h` for headings, `a` for accents, `g` for the selected row background, `x` for selected row text, or `v` for visible columns. Enter colors as `#RRGGBB`; enter `default` to use the current theme's color. Custom color values take precedence over the selected theme. Column names are comma separated and appear in the order entered.
+Use `b` for the border color, `h` for headings, `a` for accents, `g` for the selected row background, `x` for selected row text, or `v` for visible columns. Color input appears beside its setting; enter `#RRGGBB` and press `Enter` to save and refresh the preview. Enter `default` to use the current theme's color. Custom color values take precedence over the selected theme. Column names are comma separated and appear in the order entered.
 
 The same settings can be changed from the command line:
 
@@ -106,6 +109,10 @@ Task IDs accept any unique prefix, which makes shell scripts easier to read whil
 ## Storage and recovery
 
 Data is stored at the standard OS-specific user data path returned by `env-paths` under `todo-dashboard/store.json`. Mutations use an exclusive lock and atomic rename. `store.json.bak` contains the immediately previous valid revision. Invalid data is reported and never silently replaced; inspect it with `todo doctor` and explicitly restore with `todo doctor --restore-backup`.
+
+## Future features
+
+- [Future features](FUTURE_FEATURES.md) — proposed ideas and open questions, starting with subtasks.
 
 ## Development
 

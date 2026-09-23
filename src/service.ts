@@ -17,9 +17,10 @@ import {
 } from './domain.js';
 import {StoreRepository} from './storage.js';
 
-type AddOptions = {estimate?: string; due?: string; priority?: string};
+type AddOptions = {description?: string; estimate?: string; due?: string; priority?: string};
 type EditOptions = {
   title?: string;
+  description?: string;
   priority?: string;
   estimate?: string;
   remaining?: string;
@@ -43,6 +44,7 @@ export class TodoService {
     await this.repository.mutate(store => {
       created = createTask({
         title,
+        ...(options.description === undefined ? {} : {description: options.description}),
         priority: options.priority ? parsePriority(options.priority) : 'medium',
         estimateMs: options.estimate ? parseDuration(options.estimate) : null,
         deadlineAt: options.due ? parseDeadline(options.due, this.now(), store.settings.defaultDeadlineTime) : null
@@ -73,6 +75,7 @@ export class TodoService {
         : undefined;
       result = updateTask(current, {
         ...(options.title === undefined ? {} : {title: options.title}),
+        ...(options.description === undefined ? {} : {description: options.description}),
         ...(options.priority === undefined ? {} : {priority: parsePriority(options.priority)}),
         ...(options.clearEstimate ? {estimateMs: null} : options.estimate ? {estimateMs: parseDuration(options.estimate)} : {}),
         ...(options.remaining ? {remainingMs: parseDuration(options.remaining)} : {}),

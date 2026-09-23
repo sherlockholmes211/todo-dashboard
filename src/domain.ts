@@ -57,6 +57,13 @@ export const taskSchema = z.object({
     }),
     'Title must not contain control characters'
   ),
+  description: z.string().trim().max(2000).refine(
+    description => Array.from(description).every(character => {
+      const codePoint = character.codePointAt(0)!;
+      return codePoint > 31 && (codePoint < 127 || codePoint > 159);
+    }),
+    'Description must not contain control characters'
+  ).default(''),
   status: z.enum(['pending', 'in_progress', 'completed']),
   priority: prioritySchema.default('medium'),
   estimateMs: z.number().positive().nullable(),
@@ -130,13 +137,14 @@ export function parseDeadline(input: string, now = new Date(), defaultTime = '23
   return parsed.toISOString();
 }
 
-type CreateTaskInput = {title: string; estimateMs?: number | null; deadlineAt?: string | null; priority?: Priority};
+type CreateTaskInput = {title: string; description?: string; estimateMs?: number | null; deadlineAt?: string | null; priority?: Priority};
 
 export function createTask(input: CreateTaskInput, now = new Date(), id: string = randomUUID()): Task {
   const iso = now.toISOString();
   return taskSchema.parse({
     id,
     title: input.title,
+    description: input.description ?? '',
     status: 'pending',
     priority: input.priority ?? 'medium',
     estimateMs: input.estimateMs ?? null,
@@ -187,6 +195,7 @@ export function reopenTask(task: Task, now = new Date()): Task {
 
 type TaskChanges = {
   title?: string;
+  description?: string;
   priority?: Priority;
   estimateMs?: number | null;
   remainingMs?: number;
@@ -202,6 +211,7 @@ export function updateTask(task: Task, changes: TaskChanges, now = new Date()): 
   return taskSchema.parse({
     ...task,
     ...(changes.title === undefined ? {} : {title: changes.title}),
+    ...(changes.description === undefined ? {} : {description: changes.description}),
     ...(changes.priority === undefined ? {} : {priority: changes.priority}),
     ...(changes.deadlineAt === undefined ? {} : {deadlineAt: changes.deadlineAt}),
     estimateMs,
