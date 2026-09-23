@@ -565,7 +565,9 @@ describe('task editor deadline', () => {
       await new Promise<void>(resolve => setImmediate(resolve));
       view.stdin.write('e');
       await vi.waitFor(() => expect(view.lastFrame()).toContain('EDIT TASK'));
+      await new Promise<void>(resolve => setImmediate(resolve));
       view.stdin.write('\u001b[B');
+      await vi.waitFor(() => expect(view.lastFrame()).toMatch(/› Estimate/));
       view.stdin.write('\u001b[B');
       await vi.waitFor(() => expect(view.lastFrame()).toMatch(/› Priority/));
       view.stdin.write('\r');
