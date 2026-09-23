@@ -446,10 +446,14 @@ describe('task editor deadline', () => {
       await vi.waitFor(() => expect(view.lastFrame()).toContain('Plan release'));
       view.stdin.write('e');
       await vi.waitFor(() => expect(view.lastFrame()).toContain('EDIT TASK'));
-      for (let index = 0; index < 3; index++) view.stdin.write('\u001b[B');
-      await vi.waitFor(() => expect(view.lastFrame()).toMatch(/› Deadline date/));
+      await new Promise<void>(resolve => setImmediate(resolve));
+      for (const field of ['Estimate', 'Priority', 'Deadline date']) {
+        view.stdin.write('\u001b[B');
+        await vi.waitFor(() => expect(view.lastFrame()).toMatch(new RegExp(`› ${field}`)));
+      }
       view.stdin.write('\r');
       await vi.waitFor(() => expect(view.lastFrame()).toContain('Su  Mo  Tu  We  Th  Fr  Sa'));
+      await new Promise<void>(resolve => setImmediate(resolve));
       expect(view.lastFrame()).toContain('2026-10-10');
       view.stdin.write('\u001b[C');
       await vi.waitFor(() => expect(view.lastFrame()).toContain('2026-10-11'));
@@ -497,6 +501,7 @@ describe('task editor deadline', () => {
       await vi.waitFor(() => expect(view.lastFrame()).toMatch(/› Deadline time/));
       view.stdin.write('\r');
       await vi.waitFor(() => expect(view.lastFrame()).toContain('Hours'));
+      await new Promise<void>(resolve => setImmediate(resolve));
       view.stdin.write('09:35');
       view.stdin.write('\r');
       await vi.waitFor(() => expect(view.lastFrame()).not.toContain('Hours   Minutes'));
@@ -592,12 +597,17 @@ describe('task editor deadline', () => {
     const view = render(<TodoApp service={service} />);
     try {
       await vi.waitFor(() => expect(view.lastFrame()).toContain('Plan release'));
+      await new Promise<void>(resolve => setImmediate(resolve));
       view.stdin.write('e');
       await vi.waitFor(() => expect(view.lastFrame()).toContain('EDIT TASK'));
-      for (let index = 0; index < 3; index++) view.stdin.write('\u001b[B');
-      await vi.waitFor(() => expect(view.lastFrame()).toMatch(/› Deadline date/));
+      await new Promise<void>(resolve => setImmediate(resolve));
+      for (const field of ['Estimate', 'Priority', 'Deadline date']) {
+        view.stdin.write('\u001b[B');
+        await vi.waitFor(() => expect(view.lastFrame()).toMatch(new RegExp(`› ${field}`)));
+      }
       view.stdin.write('\r');
       await vi.waitFor(() => expect(view.lastFrame()).toContain('Su  Mo  Tu  We  Th  Fr  Sa'));
+      await new Promise<void>(resolve => setImmediate(resolve));
       view.stdin.write('2026-11-15');
       await vi.waitFor(() => expect(view.lastFrame()).toContain('> 2026-11-15'));
       view.stdin.write('\r');
@@ -606,6 +616,7 @@ describe('task editor deadline', () => {
       await vi.waitFor(() => expect(view.lastFrame()).toMatch(/› Deadline time/));
       view.stdin.write('\r');
       await vi.waitFor(() => expect(view.lastFrame()).toContain('Hours'));
+      await new Promise<void>(resolve => setImmediate(resolve));
       view.stdin.write('09:35');
       await vi.waitFor(() => expect(view.lastFrame()).toContain('> 09:35'));
       view.stdin.write('\r');
