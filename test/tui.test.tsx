@@ -629,6 +629,7 @@ describe('task editor deadline', () => {
       view.stdin.write('b');
       await vi.waitFor(() => expect(view.lastFrame()).toContain('Border color'));
       view.stdin.write('#123456');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Border color: > #123456'));
       view.stdin.write('\r');
       await vi.waitFor(() => {
         expect(view.lastFrame()).toContain('Settings');
@@ -638,10 +639,10 @@ describe('task editor deadline', () => {
       view.stdin.write('v');
       await vi.waitFor(() => expect(view.lastFrame()).toContain('Visible columns'));
       view.stdin.write('task,dueIn');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('Visible columns: > task,dueIn'));
       view.stdin.write('\r');
-      await vi.waitFor(() => expect(view.lastFrame()).toContain('task,dueIn'));
+      await vi.waitFor(async () => expect(await service.getConfig('visibleColumns')).toEqual(['task', 'dueIn']));
       expect(await service.getConfig('borderColor')).toBe('#123456');
-      expect(await service.getConfig('visibleColumns')).toEqual(['task', 'dueIn']);
     } finally {
       view.unmount();
       await rm(directory, {recursive: true, force: true});
