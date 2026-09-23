@@ -375,7 +375,9 @@ describe('task editor deadline', () => {
       await vi.waitFor(() => expect(view.lastFrame()).toContain('Priority'));
       view.stdin.write('\r');
       await vi.waitFor(() => expect(view.lastFrame()).toContain('Su  Mo  Tu  We  Th  Fr  Sa'));
+      await new Promise<void>(resolve => setImmediate(resolve));
       view.stdin.write('2026-10-10');
+      await vi.waitFor(() => expect(view.lastFrame()).toContain('> 2026-10-10'));
       view.stdin.write('\r');
       await vi.waitFor(() => expect(view.lastFrame()).toContain('Deadline time'));
       view.stdin.write('20:10');
@@ -560,6 +562,7 @@ describe('task editor deadline', () => {
     const view = render(<TodoApp service={service} />);
     try {
       await vi.waitFor(() => expect(view.lastFrame()).toContain('Plan release'));
+      await new Promise<void>(resolve => setImmediate(resolve));
       view.stdin.write('e');
       await vi.waitFor(() => expect(view.lastFrame()).toContain('EDIT TASK'));
       view.stdin.write('\u001b[B');
@@ -629,7 +632,8 @@ describe('task editor deadline', () => {
       view.stdin.write('\r');
       await vi.waitFor(() => {
         expect(view.lastFrame()).toContain('Settings');
-        expect(view.lastFrame()).toContain('#123456');
+        expect(view.lastFrame()).toContain('border: #123456');
+        expect(view.lastFrame()).not.toContain('Border color: >');
       });
       view.stdin.write('v');
       await vi.waitFor(() => expect(view.lastFrame()).toContain('Visible columns'));
