@@ -904,6 +904,8 @@ describe('task editor deadline', () => {
       for (let index = 0; index < 5; index++) view.stdin.write('\b');
       view.stdin.write('\r');
       await vi.waitFor(() => expect(view.lastFrame()).toContain('Description (optional)'));
+      // Ink attaches the new prompt's input listener after rendering its first frame.
+      await new Promise<void>(resolve => setImmediate(resolve));
       view.stdin.write('\r');
       await vi.waitFor(() => expect(view.lastFrame()).toContain('Task created'));
       expect((await service.list())[0]).toMatchObject({title: 'Write docs', deadlineAt: null});
