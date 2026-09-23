@@ -4,6 +4,10 @@
 
 Requires Node.js 22.12 or newer.
 
+## Preview
+
+![todo-dashboard showing tasks, timers, deadlines, progress, priorities, and health in a wide terminal](docs/images/dashboard.png)
+
 ## Features
 
 - Interactive terminal dashboard built with Ink, with responsive narrow, medium, and wide layouts.
@@ -66,7 +70,25 @@ The dashboard separates **Effort Left** (estimate minus tracked time) from **Due
 
 ## Dashboard keys
 
-`↑`/`↓` or `j`/`k` navigate, `Enter` shows details, `n` creates, `e` edits, `s` starts, `p` pauses, `P` pauses all, `c` completes, `r` reopens, `d` deletes, `/` searches, `o` changes sorting, `,` opens settings, `?` shows help, and `q` quits.
+Select a task with `↑`/`↓` or `j`/`k`, then use these keys in the dashboard:
+
+| Key | Action |
+| --- | --- |
+| `n` | Create a task |
+| `Enter` | View the selected task's details |
+| `e` | Edit the selected task |
+| `s` | Start tracking time for the selected task |
+| `p` | Pause tracking time for the selected task |
+| `P` | Pause all running timers |
+| `c` | Complete the selected task |
+| `r` | Reopen the selected task |
+| `d` | Delete the selected task |
+| `f` | Filter tasks by status |
+| `/` | Search tasks |
+| `o` | Change the sort order |
+| `,` | Open settings |
+| `?` | Show keyboard help |
+| `q` | Quit the dashboard |
 
 In Edit Task, use `↑`/`↓` or `Tab` to select a field and `Enter` to edit it. Use `←`/`→` to choose a priority; the highlighted arrow shows the last direction. Priority does not accept typed input. Date and time fields support both typing and picker keys. Press `s` to save all changes. `Esc` leaves the active field without applying it; press `Esc` again to cancel the form. New Task guides you through the fields in order, ending with an optional description.
 

@@ -447,6 +447,7 @@ export function Dashboard({tasks, settings: overrides, width: requestedWidth, no
       })}
       {layout === 'narrow' && active && !customColumns && <><Text>Selected: {active.title}</Text><Text>effort left {selectedWorkLeft === null ? '—' : formatDuration(selectedWorkLeft)} · due in {formatDueIn(active, selectedTime)}</Text></>}
     </Box>
+    <Text dimColor={!settings.monochrome}>Enter details · n new · e edit · s start · p pause · P pause all · c complete · r reopen · d delete</Text>
     <Text dimColor={!settings.monochrome}>j/k navigate · f filter · o sort · , settings · {searching ? 'Enter/Esc exit search' : '/ search'} · ? help · q quit</Text>
   </Box>;
 }
@@ -593,7 +594,7 @@ export function TodoApp({service}: {service: TodoService}) {
 
   const visibleTaskCount = tasks.filter(task => settings.showCompleted || task.status !== 'completed').length;
   // Match the dashboard's summary, gap, task panel, and footer around its task rows.
-  const screenHeight = 10 + Math.max(1, visibleTaskCount) + (visibleTaskCount > 0 && (process.stdout.columns ?? 80) < 80 ? 1 : 0);
+  const screenHeight = 11 + Math.max(1, visibleTaskCount) + (visibleTaskCount > 0 && (process.stdout.columns ?? 80) < 80 ? 1 : 0);
 
   if (modal?.kind === 'edit') return <EditTaskForm initial={modal} settings={settings} height={screenHeight} onSave={saveEditor} onCancel={() => setModal(null)} />;
   if (modal?.kind === 'new') {

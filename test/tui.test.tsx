@@ -207,6 +207,14 @@ describe('Dashboard', () => {
     expect(view.lastFrame()).toContain(', settings');
   });
 
+  it('shows task and timer shortcuts below the task panel', () => {
+    const view = render(<Dashboard tasks={tasks} width={180} now={() => now} />);
+    const footer = (view.lastFrame() ?? '').split('╰').at(-1) ?? '';
+    for (const shortcut of ['Enter details', 'n new', 'e edit', 's start', 'p pause', 'P pause all', 'c complete', 'r reopen', 'd delete']) {
+      expect(footer).toContain(shortcut);
+    }
+  });
+
   it('shows search entry and exit shortcuts in the footer', async () => {
     const view = render(<Dashboard tasks={tasks} width={100} now={() => now} />);
     expect(view.lastFrame()).toContain('/ search');
@@ -896,6 +904,8 @@ describe('task editor deadline', () => {
       for (let index = 0; index < 5; index++) view.stdin.write('\b');
       view.stdin.write('\r');
       await vi.waitFor(() => expect(view.lastFrame()).toContain('Description (optional)'));
+      // Ink attaches the new prompt's input listener after rendering its first frame.
+      await new Promise<void>(resolve => setImmediate(resolve));
       view.stdin.write('\r');
       await vi.waitFor(() => expect(view.lastFrame()).toContain('Task created'));
       expect((await service.list())[0]).toMatchObject({title: 'Write docs', deadlineAt: null});
