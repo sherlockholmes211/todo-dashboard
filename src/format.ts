@@ -23,6 +23,7 @@ export function formatTask(task: Task, now = new Date()): string {
   const metrics = getMetrics(task, now);
   return [
     `${task.id.slice(0, 8)}  ${task.title}`,
+    ...(task.description ? [`Description: ${task.description}`] : []),
     `Status: ${task.status}`,
     `Priority: ${task.priority.toUpperCase()}`,
     `Tracked: ${formatDuration(metrics.effectiveTrackedMs)}`,

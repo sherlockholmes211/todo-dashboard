@@ -18,6 +18,16 @@ beforeEach(async () => {
 afterEach(async () => rm(directory, {recursive: true, force: true}));
 
 describe('TodoService', () => {
+  it('stores an optional description and lets it be changed or cleared', async () => {
+    const created = await service.add('Plan release', {description: 'Coordinate the launch checklist'});
+    expect((await service.show(created.id)).description).toBe('Coordinate the launch checklist');
+    const reopened = new TodoService(new StoreRepository(join(directory, 'store.json')));
+    expect((await reopened.show(created.id)).description).toBe('Coordinate the launch checklist');
+    await service.edit(created.id, {description: 'Confirm rollout owners'});
+    expect((await service.show(created.id)).description).toBe('Confirm rollout owners');
+    await service.edit(created.id, {description: ''});
+    expect((await service.show(created.id)).description).toBe('');
+  });
   it('creates, edits, lists, shows, and deletes tasks by unique ID prefix', async () => {
     const created = await service.add('Write docs', {estimate: '2h', due: 'tomorrow 6pm'});
     expect(created.title).toBe('Write docs');

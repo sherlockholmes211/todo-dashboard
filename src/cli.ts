@@ -35,11 +35,12 @@ export async function executeCli(args: string[], dependencies: CliDependencies):
 
   program.command('add')
     .argument('<title>')
+    .option('--description <text>')
     .option('--estimate <duration>')
     .option('--priority <level>')
     .option('--due <deadline>')
     .option('--json')
-    .action(async (title: string, options: {estimate?: string; due?: string; priority?: string; json?: boolean}) => {
+    .action(async (title: string, options: {description?: string; estimate?: string; due?: string; priority?: string; json?: boolean}) => {
       taskOutput(await service.add(title, options), options.json);
     });
 
@@ -60,6 +61,7 @@ export async function executeCli(args: string[], dependencies: CliDependencies):
   program.command('edit')
     .argument('<id>')
     .option('--title <text>')
+    .option('--description <text>')
     .option('--priority <level>')
     .option('--estimate <duration>')
     .option('--remaining <duration>')

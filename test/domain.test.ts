@@ -66,6 +66,13 @@ describe('task lifecycle and calculations', () => {
     expect(() => taskSchema.parse({...task, priority: 'critical'})).toThrow();
   });
 
+  it('loads tasks saved before descriptions existed', () => {
+    const task = createTask({title: 'A'}, now);
+    const legacy = {...task} as Partial<typeof task>;
+    delete legacy.description;
+    expect(taskSchema.parse(legacy).description).toBe('');
+  });
+
   it('requires a nonblank title no longer than 200 characters', () => {
     expect(() => createTask({title: '   '}, now)).toThrow(/title/i);
     expect(() => createTask({title: 'x'.repeat(201)}, now)).toThrow(/200/i);

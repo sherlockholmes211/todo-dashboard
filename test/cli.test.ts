@@ -69,6 +69,18 @@ describe('CLI', () => {
     expect((await service.show(task.id)).priority).toBe('urgent');
   });
 
+  it('accepts descriptions in add and edit and shows them only in task details', async () => {
+    const added = await run(['add', 'Plan release', '--description', 'Draft checklist', '--json']);
+    expect(added.code).toBe(0);
+    const task = JSON.parse(added.stdout);
+    expect(task.description).toBe('Draft checklist');
+    expect((await run(['list'])).stdout).not.toContain('Draft checklist');
+    expect((await run(['show', task.id])).stdout).toContain('Description: Draft checklist');
+    const edited = await run(['edit', task.id, '--description', 'Confirm owners']);
+    expect(edited.code).toBe(0);
+    expect((await run(['show', task.id])).stdout).toContain('Description: Confirm owners');
+  });
+
   it('sends validation errors to stderr with a nonzero code', async () => {
     const result = await run(['add', ' ', '--estimate', 'nonsense']);
     expect(result.code).toBe(1);
